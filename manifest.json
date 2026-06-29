@@ -1,7 +1,7 @@
 {
   "id": "md-reader",
   "name": "MD Reader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.4.0",
   "description": "Read your notes like an e-book: rendered Markdown is laid out in pages you flip sideways by swipe, tap, or arrow keys, as a single page or a two-page spread, on desktop and mobile.",
   "author": "mrrepac",

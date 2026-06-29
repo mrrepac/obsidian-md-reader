@@ -107,8 +107,10 @@ const STRINGS = {
 };
 let APP_LANG = 'en';
 try {
-  const l = window.localStorage.getItem('language');
-  if (l && STRINGS[l]) APP_LANG = l;
+  // Obsidian sets moment's locale to the app language — read it instead of localStorage
+  const loc = (window.moment && window.moment.locale && window.moment.locale()) || '';
+  const code = String(loc).toLowerCase().split('-')[0];
+  if (STRINGS[code]) APP_LANG = code;
 } catch (e) { /* ignore */ }
 const t = (k) => (STRINGS[APP_LANG] && STRINGS[APP_LANG][k]) || STRINGS.en[k] || k;
 

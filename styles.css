@@ -1,8 +1,9 @@
-/* ===== mdreader (книжный ридер с листанием вбок) ===== */
+/* ===== MD Reader (paginated horizontal reader) ===== */
 
-/* Хост вью: убираем стандартные отступы, занимаем всю высоту */
-.hr-view-content {
-  padding: 0 !important;
+/* Host view: remove default padding, fill the leaf.
+   Scoped, high-specificity selector so it wins without !important. */
+.workspace-leaf-content[data-type="horizontal-reader-view"] .view-content.hr-view-content {
+  padding: 0;
   height: 100%;
   overflow: hidden;
 }
@@ -207,9 +208,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Скрытие интерфейса по тапу в центр */
+/* Hide our own controls (center tap). Equal specificity + later source
+   order win over the hover rule, so no !important needed. */
 .hr-viewport.hr-hide-ui .hr-ui {
-  opacity: 0 !important;
+  opacity: 0;
   pointer-events: none;
 }
 .hr-ui { transition: opacity 0.2s ease; }
@@ -222,9 +224,12 @@
   font-size: 0.9em;
 }
 
-/* ===== Полноэкранное чтение: прячем «хром» Obsidian =====
-   Классы вешает плагин на <body>: hr-immersive (режим включён) +
-   hr-chrome-hidden (хром скрыт; снимается тапом по центру). */
+/* ===== Immersive reading: hide Obsidian's own chrome =====
+   The plugin toggles body classes: hr-immersive (mode on) +
+   hr-chrome-hidden (chrome hidden; toggled by a center tap).
+   !important is intentional below: we override Obsidian's own header /
+   mobile navbar / status bar, whose display is controlled by the app's
+   own (and sometimes higher-specificity) rules. */
 
 /* верхняя шапка именно вкладки ридера */
 body.hr-immersive.hr-chrome-hidden
