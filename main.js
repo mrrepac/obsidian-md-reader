@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS = {
   rememberPosition: true, // remember position per note
   showTitle: true,        // show note title on the first page
   openIn: 'new-tab',      // 'new-tab' | 'current' | 'split' | 'window'
-  collapseSidebars: true, // collapse side panels on open (restore on close)
+  collapseSidebars: true, // collapse side panels while reading; restore on leaving the reader
   immersive: true,        // hide app header & bottom bar for full-screen reading
 };
 
@@ -384,6 +384,13 @@ class ReaderView extends ItemView {
     }
   }
 
+  exitReadingChrome() {
+    // Esc: «дочитал» — вернуть весь интерфейс (боковые панели + хром Obsidian + наши контролы)
+    document.body.classList.remove('hr-chrome-hidden');
+    if (this.viewport) this.viewport.classList.remove('hr-hide-ui');
+    if (this.plugin && this.plugin.restoreSidebars) this.plugin.restoreSidebars();
+  }
+
   buildScope() {
     const s = new Scope(this.app.scope);
     const reg = (mods, key, fn) => s.register(mods, key, () => { fn(); return false; });
@@ -395,6 +402,7 @@ class ReaderView extends ItemView {
     reg(['Shift'], ' ', () => this.prev());
     reg([], 'Home', () => this.goTo(0));
     reg([], 'End', () => this.goTo(this.totalPages - 1));
+    reg([], 'Escape', () => this.exitReadingChrome());
     this._scope = s;
     this._scopePushed = false;
   }
@@ -693,7 +701,6 @@ class MdReaderPlugin extends Plugin {
 
     await leaf.setViewState({ type: VIEW_TYPE_READER, active: true, state: { filePath: file.path } });
     this.app.workspace.revealLeaf(leaf);
-    this.collapseSidebars();
     this.applyImmersive(leaf);
   }
 
@@ -712,7 +719,6 @@ class MdReaderPlugin extends Plugin {
 
   restoreSidebars() {
     if (!this.settings.collapseSidebars || !this._sidebarPrev) return;
-    if (this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).length > 0) return;
     const ls = this.app.workspace.leftSplit, rs = this.app.workspace.rightSplit;
     if (ls && this._sidebarPrev.left === false && ls.collapsed) ls.expand();
     if (rs && this._sidebarPrev.right === false && rs.collapsed) rs.expand();
@@ -727,6 +733,11 @@ class MdReaderPlugin extends Plugin {
     document.body.classList.toggle('hr-immersive', on);
     if (on) document.body.classList.add('hr-chrome-hidden');
     else document.body.classList.remove('hr-chrome-hidden');
+    // боковые панели: свёрнуты пока активен ридер, возвращаются когда уходишь из него
+    if (this.settings.collapseSidebars) {
+      if (isReader) this.collapseSidebars();
+      else this.restoreSidebars();
+    }
   }
 
   refreshOpenViews() {
