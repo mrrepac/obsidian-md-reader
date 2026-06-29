@@ -1,0 +1,8 @@
+# Per-user plugin data (reading positions & settings) — not part of the plugin
+data.json
+
+# Tooling / OS
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
