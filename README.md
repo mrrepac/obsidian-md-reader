@@ -47,6 +47,7 @@ Then:
 | Open in | New tab, current tab, split, or new window. |
 | Collapse side panels | Hide the side panels while reading. |
 | Immersive | Hide the app chrome for full-screen reading. |
+| Hide the system status bar (mobile) | On a phone, also hide the OS status bar (clock, notifications) while reading. Experimental. |
 
 ## Installation
 

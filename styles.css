@@ -86,20 +86,16 @@
   break-inside: avoid;
 }
 
-/* --- Контроль разрывов: не резать элементы между страницами --- */
+/* --- Контроль разрывов: не резать МЕЛКИЕ неделимые элементы между страницами.
+   НЕ включаем потенциально высокие контейнеры (ul/ol/pre/blockquote/table/.callout):
+   если такой блок выше колонки, break-inside:avoid не даёт ему разорваться, и хвост
+   уходит под обрез .hr-stage overflow:hidden — часть контента пропадает совсем. --- */
 .hr-content img,
 .hr-content svg,
-.hr-content table,
-.hr-content pre,
-.hr-content blockquote,
 .hr-content figure,
 .hr-content audio,
 .hr-content video,
-.hr-content .callout,
-.hr-content .internal-embed,
-.hr-content .math-block,
-.hr-content ul,
-.hr-content ol {
+.hr-content .math-block {
   break-inside: avoid;
   -webkit-column-break-inside: avoid;
 }
@@ -243,4 +239,24 @@ body.hr-immersive.hr-chrome-hidden .mobile-navbar {
 /* нижняя строка состояния на десктопе (счётчик слов и т.п.) */
 body.hr-immersive.hr-chrome-hidden .status-bar {
   display: none !important;
+}
+
+/* ===== Мобильный: меньше пустоты у верхнего края страницы =====
+   На телефоне вертикальное место дорого — ужимаем верхний отступ контента.
+   Отступ под системную панель ОС (safe-area) держит сам Obsidian на родителе;
+   если включить «Прятать системную панель», уйдёт и он. */
+.is-mobile .hr-content {
+  padding-top: 0.6em;
+}
+
+/* Когда системная панель ОС спрятана (моб.) — обнулить зарезервированный под неё
+   отступ safe-area, чтобы контент занял самый верх экрана. Переопределяем и переменную
+   Obsidian, и (на всякий случай) верхний паддинг корневых контейнеров. */
+body.hr-hide-sysbar {
+  --safe-area-inset-top: 0px !important;
+}
+body.hr-hide-sysbar .app-container,
+body.hr-hide-sysbar .workspace,
+body.hr-hide-sysbar .workspace-leaf-content[data-type="horizontal-reader-view"] {
+  padding-top: 0 !important;
 }

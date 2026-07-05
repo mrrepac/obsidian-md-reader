@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   openIn: 'new-tab',      // 'new-tab' | 'current' | 'split' | 'window'
   collapseSidebars: true, // collapse side panels while reading; restore on leaving the reader
   immersive: true,        // hide app header & bottom bar for full-screen reading
+  hideMobileBar: false,   // (mobile) also hide the OS status bar while reading — experimental
 };
 
 /* ---------- i18n: English by default, Russian when Obsidian language is ru ---------- */
@@ -67,6 +68,8 @@ const STRINGS = {
     sCollapseDesc: 'Hide the left and right panels when the reader opens and restore them when the tab closes',
     sImmersive: 'Immersive reading',
     sImmersiveDesc: 'Hide the app header and bottom bar. Tap the center of the page to toggle them',
+    sHideBar: 'Hide the system status bar (mobile)',
+    sHideBarDesc: 'While reading on a phone, also hide the OS status bar (clock, notifications). Experimental — may not work on every device',
   },
   ru: {
     fallbackTitle: 'MD Reader',
@@ -103,6 +106,8 @@ const STRINGS = {
     sCollapseDesc: 'Прятать левую и правую панели при открытии ридера и возвращать при закрытии вкладки',
     sImmersive: 'Полноэкранное чтение',
     sImmersiveDesc: 'Прятать верхнюю шапку и нижнюю панель. Тап по центру страницы — показать/скрыть их',
+    sHideBar: 'Прятать системную панель (моб.)',
+    sHideBarDesc: 'При чтении на телефоне прятать и системную панель ОС (часы, уведомления). Экспериментально — может не работать на некоторых устройствах',
   },
 };
 let APP_LANG = 'en';
@@ -140,6 +145,7 @@ class ReaderView extends ItemView {
     this._renderGen = 0;
     this._raf = 0;
     this._repaginateTimer = null;
+    this._measured = false;
   }
 
   getViewType() { return VIEW_TYPE_READER; }
@@ -206,6 +212,13 @@ class ReaderView extends ItemView {
     if (this._repaginateTimer) { clearTimeout(this._repaginateTimer); this._repaginateTimer = null; }
     this.savePos();
     if (this.renderChild) { this.removeChild(this.renderChild); this.renderChild = null; }
+    // Забыть ссылку на наш документ, если иммерсив висел на нём: это может быть
+    // закрывающееся попап-окно, и обращение к его мёртвому body позже упало бы.
+    // Классы на body НЕ трогаем: для живого окна ими управляет active-leaf-change
+    // (который снимет иммерсив, если следующим активным станет не-ридер), а соседний
+    // ридер в том же окне не должен потерять/перепрятать хром из-за нашего закрытия.
+    const doc = (this.contentEl && this.contentEl.ownerDocument) || document;
+    if (this.plugin && this.plugin._immersiveDoc === doc) this.plugin._immersiveDoc = null;
     if (this.contentEl) this.contentEl.empty();
   }
 
@@ -236,13 +249,24 @@ class ReaderView extends ItemView {
     this.content.empty();
     this.content.style.transform = 'translateX(0px)';
     this.page = 0;
+    this._measured = false;
 
-    await MarkdownRenderer.render(this.app, body, this.content, this.file.path, this.renderChild);
+    try {
+      await MarkdownRenderer.render(this.app, body, this.content, this.file.path, this.renderChild);
+    } catch (e) {
+      console.error('MD Reader: ошибка рендера Markdown', e);
+    }
     if (gen !== this._renderGen) return;
 
     if (this.plugin.settings.showTitle) {
-      const first = this.content.firstElementChild;
-      if (!(first && first.tagName === 'H1')) {
+      // не добавлять имя файла, если у заметки уже есть свой H1 среди первых блоков
+      // (заметка может начинаться с картинки/callout, а # заголовок идти следом)
+      const kids = this.content.children;
+      let hasOwnH1 = false;
+      for (let i = 0; i < kids.length && i < 4; i++) {
+        if (kids[i].tagName === 'H1') { hasOwnH1 = true; break; }
+      }
+      if (!hasOwnH1) {
         const tt = this.content.createEl('h1', { cls: 'hr-title', text: this.file.basename });
         this.content.insertBefore(tt, this.content.firstChild);
       }
@@ -263,12 +287,9 @@ class ReaderView extends ItemView {
     this._raf = requestAnimationFrame(() => {
       this._raf = 0;
       if (gen !== this._renderGen || !this.content || !this.content.isConnected) return;
+      // measure() сам применит отложенное восстановление позиции (_pendingFraction),
+      // но только когда действительно смерит вьюпорт (clientWidth > 0)
       this.measure();
-      if (this._pendingFraction) {
-        this.goTo(Math.round(this._pendingFraction * (this.totalPages - 1)));
-        this._pendingFraction = 0;
-      }
-      this.updateStatus();
     });
 
     if (this.viewport) this.viewport.focus();
@@ -309,8 +330,22 @@ class ReaderView extends ItemView {
 
     const sw = this.content.scrollWidth;
     this.totalPages = Math.max(1, Math.round((sw + gap) / this.pageStride));
+    this._measured = true;
+
+    // отложенное восстановление сохранённой позиции — применяем ТОЛЬКО после
+    // реального замера, иначе доля умножалась бы на (totalPages-1)=0 и терялась
+    if (this._pendingFraction) {
+      this.page = Math.round(this._pendingFraction * (this.totalPages - 1));
+      // не финализируем восстановление, пока в контенте есть ещё не загруженные
+      // картинки: они увеличат высоту и число страниц. Пока доля жива, repaginate
+      // после каждой догрузки применит ЕЁ ЖЕ заново (а не пересчитает из уже
+      // дискретизированного page) — иначе закладка на заметке с картинками уползает
+      const mediaLoading = Array.from(this.content.querySelectorAll('img')).some((im) => !im.complete);
+      if (!mediaLoading) this._pendingFraction = 0;
+    }
     if (this.page > this.totalPages - 1) this.page = this.totalPages - 1;
     if (this.page < 0) this.page = 0;
+    if (!isFinite(this.page)) this.page = 0;
 
     this.applyTransform();
     this.updateStatus();
@@ -343,6 +378,11 @@ class ReaderView extends ItemView {
   savePos() {
     const s = this.plugin.settings;
     if (!s.rememberPosition || !this.file) return;
+    // не сохранять, пока вьюпорт не измерен: до первого замера totalPages=1/page=0,
+    // и запись затёрла бы реальную закладку нулём при быстром закрытии/переключении
+    if (!this._measured) return;
+    // позиция ещё восстанавливается (ждём догрузки картинок) — не затирать сохранённую долю
+    if (this._pendingFraction) return;
     this.plugin.db[this.file.path] = {
       fraction: this.totalPages > 1 ? this.page / (this.totalPages - 1) : 0,
     };
@@ -364,9 +404,15 @@ class ReaderView extends ItemView {
       this._repaginateTimer = setTimeout(() => {
         this._repaginateTimer = null;
         if (!this.content || !this.content.isConnected) return;
+        // позиция ещё не восстановлена (первый успешный замер после нулевой ширины) —
+        // пусть measure() применит _pendingFraction, не перетирая её текущим page=0
+        if (this._pendingFraction) { this.measure(); return; }
         const frac = this.totalPages > 1 ? this.page / (this.totalPages - 1) : 0;
         this.measure();
-        this.goTo(Math.round(frac * (this.totalPages - 1)));
+        this.page = Math.max(0, Math.min(Math.round(frac * (this.totalPages - 1)), this.totalPages - 1));
+        if (!isFinite(this.page)) this.page = 0;
+        this.applyTransform();
+        this.updateStatus();
       }, 150);
     };
     this._debouncedRemeasure = repaginate;
@@ -378,7 +424,8 @@ class ReaderView extends ItemView {
 
   toggleControls() {
     if (this.plugin.settings.immersive) {
-      document.body.classList.toggle('hr-chrome-hidden');
+      const doc = (this.contentEl && this.contentEl.ownerDocument) || document;
+      doc.body.classList.toggle('hr-chrome-hidden');
     } else if (this.viewport) {
       this.viewport.classList.toggle('hr-hide-ui');
     }
@@ -386,7 +433,9 @@ class ReaderView extends ItemView {
 
   exitReadingChrome() {
     // Esc: «дочитал» — вернуть весь интерфейс (боковые панели + хром Obsidian + наши контролы)
-    document.body.classList.remove('hr-chrome-hidden');
+    const doc = (this.contentEl && this.contentEl.ownerDocument) || document;
+    doc.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
+    if (this.plugin && this.plugin._immersiveDoc === doc) this.plugin._immersiveDoc = null;
     if (this.viewport) this.viewport.classList.remove('hr-hide-ui');
     if (this.plugin && this.plugin.restoreSidebars) this.plugin.restoreSidebars();
   }
@@ -442,7 +491,8 @@ class ReaderView extends ItemView {
     this.registerDomEvent(vp, 'touchstart', (e) => {
       if (e.touches.length !== 1) { abortDrag(); return; }
       const tc = e.touches[0];
-      if (Math.min(tc.clientX, window.innerWidth - tc.clientX) < OS_EDGE) { abortDrag(); return; }
+      const win = (vp.ownerDocument && vp.ownerDocument.defaultView) || window;
+      if (Math.min(tc.clientX, win.innerWidth - tc.clientX) < OS_EDGE) { abortDrag(); return; }
       x0 = tc.clientX; y0 = tc.clientY; t0 = Date.now();
       dragging = true; decided = false; horizontal = false;
       this.content.style.transition = 'none';
@@ -613,6 +663,14 @@ class ReaderSettingTab extends PluginSettingTab {
       .setDesc(t('sImmersiveDesc'))
       .addToggle((tg) => tg.setValue(this.plugin.settings.immersive)
         .onChange(async (v) => { this.plugin.settings.immersive = v; await save(); }));
+
+    if (Platform.isMobile) {
+      new Setting(containerEl)
+        .setName(t('sHideBar'))
+        .setDesc(t('sHideBarDesc'))
+        .addToggle((tg) => tg.setValue(this.plugin.settings.hideMobileBar)
+          .onChange(async (v) => { this.plugin.settings.hideMobileBar = v; await save(); }));
+    }
   }
 }
 
@@ -662,10 +720,35 @@ class MdReaderPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => this.applyImmersive(leaf)));
 
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      if (this.db[oldPath]) { this.db[file.path] = this.db[oldPath]; delete this.db[oldPath]; }
+      // перенести сохранённые позиции: сам объект и (если переименовали ПАПКУ) файлы внутри
+      const move = (from, to) => { if (this.db[from]) { this.db[to] = this.db[from]; delete this.db[from]; } };
+      move(oldPath, file.path);
+      const prefix = oldPath + '/';
+      for (const key of Object.keys(this.db)) {
+        if (key.startsWith(prefix)) move(key, file.path + '/' + key.slice(prefix.length));
+      }
+      // синхронизировать путь открытых ридеров с актуальным TFile.path (Obsidian уже
+      // обновил его — это покрывает и переименование самого файла, и его папки), иначе
+      // getState() сохранит устаревший filePath и после перезапуска заметка «не найдётся»
+      this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((l) => {
+        const v = l.view;
+        if (v && v.file) v.filePath = v.file.path;
+      });
     }));
     this.registerEvent(this.app.vault.on('delete', (file) => {
       if (this.db[file.path]) delete this.db[file.path];
+      // если удалённая заметка открыта в ридере — прервать идущий рендер (иначе он
+      // упадёт на this.file.basename), обнулить ссылки, чтобы savePos/goTo не
+      // воскресили ключ в db и getState() не сохранил путь мёртвого файла
+      this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((l) => {
+        const v = l.view;
+        if (v && v.filePath === file.path) {
+          v._renderGen++;
+          v.file = null;
+          v.filePath = null;
+          if (v.content) { v.content.empty(); v.content.createDiv('hr-empty').setText(t('notFound')); }
+        }
+      });
     }));
 
     this.registerInterval(window.setInterval(() => {
@@ -677,8 +760,13 @@ class MdReaderPlugin extends Plugin {
   onunload() {
     // do NOT detach leaves here (keeps layout intact across plugin updates)
     this.saveData(this.dataBlob());
-    document.body.classList.remove('hr-immersive');
-    document.body.classList.remove('hr-chrome-hidden');
+    this.setSysStatusBar(false); // вернуть системную панель, если прятали
+    document.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
+    // а также с документа попап-окна, если классы висели там и оно ещё живо
+    if (this._immersiveDoc && this._immersiveDoc !== document && this._immersiveDoc.body) {
+      this._immersiveDoc.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
+    }
+    this._immersiveDoc = null;
   }
 
   dataBlob() {
@@ -725,19 +813,57 @@ class MdReaderPlugin extends Plugin {
     this._sidebarPrev = null;
   }
 
+  docForLeaf(leaf) {
+    const el = leaf && leaf.view && leaf.view.contentEl;
+    return (el && el.ownerDocument) || document;
+  }
+
+  // Прячет/показывает СИСТЕМНУЮ панель ОС на мобильном через плагин Capacitor StatusBar,
+  // который присутствует в сборке Obsidian mobile. Максимально осторожно: если API нет —
+  // молча ничего не делаем, так что на десктопе и старых сборках безвредно.
+  setSysStatusBar(hide) {
+    // класс на body обнуляет зарезервированную под панель safe-area (см. styles.css)
+    document.body.classList.toggle('hr-hide-sysbar', !!hide);
+    try {
+      const cap = window.Capacitor;
+      const sb = cap && cap.Plugins && cap.Plugins.StatusBar;
+      if (!sb) return;
+      const swallow = (p) => { if (p && typeof p.catch === 'function') p.catch(() => {}); };
+      // растянуть webview на область панели, чтобы под ней не оставалось пустого отступа
+      if (sb.setOverlaysWebView) swallow(sb.setOverlaysWebView({ overlay: !!hide }));
+      swallow(hide ? (sb.hide && sb.hide()) : (sb.show && sb.show()));
+    } catch (e) { /* API недоступно на этом устройстве */ }
+  }
+
   applyImmersive(leaf) {
     leaf = leaf || this.app.workspace.activeLeaf;
     const isReader = !!(leaf && leaf.view && typeof leaf.view.getViewType === 'function'
       && leaf.view.getViewType() === VIEW_TYPE_READER);
     const on = isReader && this.settings.immersive;
-    document.body.classList.toggle('hr-immersive', on);
-    if (on) document.body.classList.add('hr-chrome-hidden');
-    else document.body.classList.remove('hr-chrome-hidden');
+    // классы вешаем на body ДОКУМЕНТА листа — в попап-окне (openIn=window) это его
+    // собственный body, а не главного окна; иначе иммерсив в попапе не работает и
+    // портит вкладки главного окна
+    const doc = this.docForLeaf(leaf);
+    if (on) {
+      // переносим иммерсив на документ этого листа; снимаем с прежнего, только если
+      // он другой и ещё жив (у закрытого попап-документа body === null)
+      const prev = this._immersiveDoc;
+      if (prev && prev !== doc && prev.body) prev.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
+      if (doc.body) doc.body.classList.add('hr-immersive', 'hr-chrome-hidden');
+      this._immersiveDoc = doc;
+    } else {
+      // ушли из ридера в ЭТОМ документе — снимаем классы только здесь. Чужой
+      // _immersiveDoc НЕ трогаем: в другом окне может быть свой активный ридер
+      if (doc.body) doc.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
+      if (this._immersiveDoc === doc) this._immersiveDoc = null;
+    }
     // боковые панели: свёрнуты пока активен ридер, возвращаются когда уходишь из него
     if (this.settings.collapseSidebars) {
       if (isReader) this.collapseSidebars();
       else this.restoreSidebars();
     }
+    // системная панель ОС (моб.): прячем пока активен иммерсивный ридер и включена опция
+    if (Platform.isMobile) this.setSysStatusBar(on && this.settings.hideMobileBar);
   }
 
   refreshOpenViews() {
