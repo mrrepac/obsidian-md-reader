@@ -26,6 +26,76 @@
   user-select: text;
 }
 
+/* ===== Тонировка страницы =====
+   Переменные темы переопределяем ЛОКАЛЬНО на вьюпорте — так за цветом тянется всё
+   внутри ридера (фон, текст, корешок, полоса прогресса), а остальной Obsidian
+   остаётся в своей теме. Классы вешает JS по настройке. */
+.hr-viewport.hr-tint-sepia {
+  --background-primary: #f4ecd8;
+  --background-primary-alt: #efe4ca;
+  --background-secondary: #efe4ca;
+  --background-modifier-border: #ddceac;
+  --text-normal: #4a3f33;
+  --text-muted: #7a6a55;
+  --text-faint: #a08d74;
+  --text-accent: #8a5a2b;
+  --interactive-accent: #b08150;
+}
+.hr-viewport.hr-tint-cream {
+  --background-primary: #fbf6ea;
+  --background-primary-alt: #f4eddc;
+  --background-secondary: #f4eddc;
+  --background-modifier-border: #e4dac2;
+  --text-normal: #3f3a31;
+  --text-muted: #736c5e;
+  --text-faint: #9c9484;
+  --text-accent: #7c6a3f;
+  --interactive-accent: #b9a267;
+}
+.hr-viewport.hr-tint-gray {
+  --background-primary: #e9e9e6;
+  --background-primary-alt: #e0e0dc;
+  --background-secondary: #e0e0dc;
+  --background-modifier-border: #cdcdc8;
+  --text-normal: #35383a;
+  --text-muted: #6a6d70;
+  --text-faint: #94979a;
+  --text-accent: #4a6572;
+  --interactive-accent: #7f949e;
+}
+.hr-viewport.hr-tint-night {
+  --background-primary: #0c0c0e;
+  --background-primary-alt: #141417;
+  --background-secondary: #141417;
+  --background-modifier-border: #26262b;
+  --text-normal: #a6a29b;
+  --text-muted: #6e6a64;
+  --text-faint: #4b4844;
+  --text-accent: #8a9aa8;
+  --interactive-accent: #566470;
+}
+/* Заголовки некоторых тем красятся своими переменными — в тонировке возвращаем
+   их к цвету основного текста, иначе они «светятся» чужим цветом на бумаге */
+.hr-viewport.hr-tinted .hr-content h1,
+.hr-viewport.hr-tinted .hr-content h2,
+.hr-viewport.hr-tinted .hr-content h3,
+.hr-viewport.hr-tinted .hr-content h4,
+.hr-viewport.hr-tinted .hr-content h5,
+.hr-viewport.hr-tinted .hr-content h6 { color: var(--text-normal); }
+.hr-viewport.hr-tinted .hr-content a { color: var(--text-accent); }
+
+/* «Вуаль» яркости: затемняет всё окно чтения, не влияя на раскладку.
+   opacity задаёт JS (0 = полная яркость) */
+.hr-dimmer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
 /* «Сцена» — книга: центрируется, её ширину задаёт JS (1 или 2 страницы) */
 .hr-stage {
   position: relative;
@@ -73,6 +143,16 @@
 }
 
 .hr-content > :first-child { margin-top: 0; }
+
+/* Выравнивание по ширине (класс вешает JS по настройке). Переносы включаем там,
+   где платформа их умеет; где нет — просто justify с чуть большими пробелами.
+   Заголовки и подписи не растягиваем. */
+.hr-content.hr-justify p,
+.hr-content.hr-justify li {
+  text-align: justify;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+}
 
 /* Заголовок заметки на первой странице (если включено) */
 .hr-title {
@@ -169,6 +249,114 @@
   .hr-viewport:hover .hr-nav-btn { opacity: 0.85; }
 }
 
+/* ===== Библиотека (модалка) ===== */
+.hr-lib-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.hr-lib-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.hr-lib-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-m, 6px);
+  cursor: pointer;
+}
+.hr-lib-row:hover { background: var(--background-secondary); }
+.hr-lib-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hr-lib-pct {
+  flex: none;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.hr-lib-x {
+  flex: none;
+  color: var(--text-faint);
+  padding: 0 4px;
+  cursor: pointer;
+}
+.hr-lib-x:hover { color: var(--text-error); }
+.hr-lib-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1.5em 0;
+}
+.hr-note-pick-path {
+  font-size: 0.75em;
+  color: var(--text-faint);
+}
+
+/* Подсветка найденного места на странице (снимается при следующем поиске) */
+.hr-content .hr-hit {
+  background: var(--text-highlight-bg, rgba(255, 208, 0, 0.4));
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* Строка результата поиска: фрагмент текста + процент по книге */
+.hr-hit-item { display: flex; align-items: baseline; gap: 0.6em; }
+.hr-hit-item .hr-hit-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9em;
+}
+.hr-hit-item .hr-hit-match {
+  background: var(--text-highlight-bg, rgba(255, 208, 0, 0.4));
+  border-radius: 3px;
+}
+.hr-hit-item .hr-hit-pct,
+.hr-bm-item .hr-bm-pct {
+  flex: none;
+  font-size: 0.75em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Строка закладки: процент + подпись + крестик */
+.hr-bm-item { display: flex; align-items: baseline; gap: 0.6em; }
+.hr-bm-item .hr-bm-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hr-bm-item .hr-bm-x {
+  flex: none;
+  color: var(--text-faint);
+  padding: 0 4px;
+  cursor: pointer;
+}
+.hr-bm-item .hr-bm-x:hover { color: var(--text-error); }
+
+/* Пункт оглавления во всплывающем списке: бейдж уровня + текст */
+.hr-toc-item { display: flex; align-items: baseline; gap: 0.55em; }
+.hr-toc-item .hr-toc-level {
+  flex: none;
+  font-size: 0.7em;
+  font-weight: 600;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.hr-toc-item .hr-toc-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Нижняя панель: прогресс + «страница X / N» */
 .hr-statusbar {
   position: absolute;
@@ -197,12 +385,21 @@
   border-radius: 2px;
   transition: width 0.2s ease;
 }
+/* Текст статуса кликабелен (открывает оглавление): у панели pointer-events:none,
+   на тексте включаем обратно; ширина по контенту, чтобы не перехватывать тапы
+   листания по нижней полосе рядом с числом */
 .hr-status-text {
   text-align: center;
   font-size: 0.75em;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+  cursor: pointer;
+  width: fit-content;
+  margin: 0 auto;
+  padding: 0 10px;
 }
+.hr-status-text:hover { color: var(--text-normal); }
 
 /* Hide our own controls (center tap). Equal specificity + later source
    order win over the hover rule, so no !important needed. */
@@ -232,6 +429,19 @@ body.hr-immersive.hr-chrome-hidden
   .workspace-leaf-content[data-type="horizontal-reader-view"] .view-header {
   display: none !important;
 }
+/* вертикальная лента с иконками слева (и справа, если включена).
+   Настройка «сворачивать боковые панели» её не убирает: там сворачиваются
+   сами панели, а узкая лента остаётся на месте */
+body.hr-immersive.hr-chrome-hidden .workspace-ribbon {
+  display: none !important;
+}
+
+/* полоса вкладок ТОЙ группы, где открыт ридер (метку вешает JS — селектором
+   от body до нужной группы не добраться). Соседние группы не трогаем */
+body.hr-immersive.hr-chrome-hidden .hr-reader-tabs .workspace-tab-header-container {
+  display: none !important;
+}
+
 /* нижняя панель навигации на телефоне */
 body.hr-immersive.hr-chrome-hidden .mobile-navbar {
   display: none !important;
@@ -241,13 +451,10 @@ body.hr-immersive.hr-chrome-hidden .status-bar {
   display: none !important;
 }
 
-/* ===== Мобильный: меньше пустоты у верхнего края страницы =====
-   На телефоне вертикальное место дорого — ужимаем верхний отступ контента.
+/* Верхний/нижний отступ страницы теперь задаёт настройка «Вертикальные поля»
+   (JS пишет padding инлайном, перебивая базовое правило на всех платформах).
    Отступ под системную панель ОС (safe-area) держит сам Obsidian на родителе;
    если включить «Прятать системную панель», уйдёт и он. */
-.is-mobile .hr-content {
-  padding-top: 0.6em;
-}
 
 /* Когда системная панель ОС спрятана (моб.) — обнулить зарезервированный под неё
    отступ safe-area, чтобы контент занял самый верх экрана. Переопределяем и переменную
