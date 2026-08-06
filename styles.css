@@ -250,6 +250,26 @@
 }
 
 /* ===== Библиотека (модалка) ===== */
+/* «Продолжить» — во всю ширину: это главная кнопка окна */
+.hr-lib-continue {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  width: 100%;
+  margin-bottom: 10px;
+  text-align: left;
+}
+.hr-lib-continue-label { flex: none; font-weight: 600; }
+.hr-lib-continue-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.hr-lib-filter {
+  width: 100%;
+  margin-bottom: 8px;
+}
 .hr-lib-actions {
   display: flex;
   gap: 8px;
@@ -269,17 +289,45 @@
   cursor: pointer;
 }
 .hr-lib-row:hover { background: var(--background-secondary); }
+.hr-lib-main {
+  flex: 1;
+  min-width: 0;
+}
+.hr-lib-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+}
 .hr-lib-title {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.hr-lib-tag {
+  flex: none;
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
 .hr-lib-pct {
   flex: none;
   font-size: 0.8em;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+/* полоска прочитанного: видно с одного взгляда, где какая книга */
+.hr-lib-bar {
+  height: 2px;
+  margin-top: 5px;
+  background: var(--background-modifier-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hr-lib-bar-fill {
+  height: 100%;
+  background: var(--interactive-accent);
 }
 .hr-lib-x {
   flex: none;
@@ -378,17 +426,24 @@
   border-radius: 2px;
   overflow: hidden;
 }
+/* заполнение тянем через scaleX: width — свойство раскладки, и её анимация
+   пересчитывалась бы браузером все 200 мс каждого перелистывания */
 .hr-progress-fill {
   height: 100%;
-  width: 0%;
+  width: 100%;
   background: var(--interactive-accent);
-  border-radius: 2px;
-  transition: width 0.2s ease;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.2s ease;
 }
 /* Текст статуса кликабелен (открывает оглавление): у панели pointer-events:none,
    на тексте включаем обратно; ширина по контенту, чтобы не перехватывать тапы
    листания по нижней полосе рядом с числом */
 .hr-status-text {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.5em;
   text-align: center;
   font-size: 0.75em;
   color: var(--text-muted);
@@ -396,10 +451,21 @@
   pointer-events: auto;
   cursor: pointer;
   width: fit-content;
+  max-width: 100%;
   margin: 0 auto;
   padding: 0 10px;
 }
 .hr-status-text:hover { color: var(--text-normal); }
+/* название главы уступает место проценту: длинное — обрезаем многоточием */
+.hr-status-chapter {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hr-status-bm,
+.hr-status-pos { flex: none; }
+/* узлы строки состояния живут постоянно, пустые не должны занимать место */
+.hr-status-text > span:empty { display: none; }
 
 /* Hide our own controls (center tap). Equal specificity + later source
    order win over the hover rule, so no !important needed. */
@@ -408,6 +474,98 @@
   pointer-events: none;
 }
 .hr-ui { transition: opacity 0.2s ease; }
+
+/* ===== Отбивка «Конец» на последней странице ===== */
+.hr-end {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2em;
+  animation: hr-end-in 0.15s ease;
+}
+/* фон отдельным слоем, а не цветом с прозрачностью: color-mix есть не во всех
+   мобильных webview, а opacity на самом блоке пригасила бы и кнопки */
+.hr-end::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--background-primary);
+  opacity: 0.9;
+}
+.hr-end > * { position: relative; }
+@keyframes hr-end-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.hr-end-title {
+  font-size: 1.6em;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.hr-end-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* ===== Панель «Оформление» ===== */
+.hr-ap-size {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 14px;
+}
+.hr-ap-name { flex: 1; }
+.hr-ap-value {
+  flex: none;
+  min-width: 3.4em;
+  text-align: center;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* кнопки размера — крупные: их жмут пальцем, часто на ходу */
+.hr-ap-step {
+  flex: none;
+  width: 2.6em;
+  height: 2.6em;
+  line-height: 1;
+  font-family: var(--font-text);
+}
+.hr-ap-small { font-size: 0.85em; }
+.hr-ap-big { font-size: 1.35em; }
+
+.hr-ap-tints {
+  display: flex;
+  gap: 10px;
+  padding-bottom: 14px;
+  flex-wrap: wrap;
+}
+.hr-ap-tint {
+  width: 2.2em;
+  height: 2.2em;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+.hr-ap-tint.is-active {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-hover);
+}
+/* цвета кружков повторяют сами тонировки */
+.hr-ap-tint-none { background: var(--background-primary); }
+.hr-ap-tint-sepia { background: #f4ecd8; }
+.hr-ap-tint-cream { background: #fbf6ea; }
+.hr-ap-tint-gray { background: #e9e9e6; }
+.hr-ap-tint-night { background: #0c0c0e; }
+/* в модалке настроечные строки без рамки сверху выглядят опрятнее */
+.hr-ap .setting-item { padding: 8px 0; }
 
 /* Пустое состояние */
 .hr-empty {

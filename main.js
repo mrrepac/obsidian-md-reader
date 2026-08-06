@@ -69,7 +69,10 @@ const STRINGS = {
     notePickPlaceholder: 'Add a note to the library…',
     cmdOpen: 'Open current note in MD Reader',
     menuOpen: 'Open in MD Reader',
-    settingsTitle: 'MD Reader',
+    sSecPage: 'Page',
+    sSecText: 'Text',
+    sSecColour: 'Colour',
+    sSecReading: 'Reading',
     sPageMode: 'Page mode',
     sPageModeDesc: 'How many pages to show on screen',
     optAuto: 'Auto (two on a wide screen, one on a narrow one)',
@@ -122,7 +125,7 @@ const STRINGS = {
     sHideBar: 'Hide the system status bar (mobile)',
     sHideBarDesc: 'While reading on a phone, also hide the OS status bar (clock, notifications). Experimental — may not work on every device',
     sJustify: 'Justify text',
-    sJustifyDesc: 'Align paragraphs to both edges, with hyphenation where the platform supports it',
+    sJustifyDesc: 'Align paragraphs to both edges, with hyphenation where the platform supports it (the desktop build has no hyphenation dictionaries). Costs about half again as much page layout — the first thing to turn off on a slow machine',
     sPadding: 'Vertical margins, em',
     sPaddingDesc: 'Empty space at the top and bottom of the page',
     cmdTint: 'Cycle page tint',
@@ -145,7 +148,20 @@ const STRINGS = {
     bmNone: 'No bookmarks in this note yet',
     bmAdded: 'Bookmark added',
     bmRemoved: 'Bookmark removed',
-    chapterShort: 'ch',
+    menuAppearance: 'Appearance',
+    cmdAppearance: 'Appearance: font, tint, margins',
+    menuBack: 'Back to where I was',
+    cmdContinue: 'Continue reading',
+    libContinue: 'Continue',
+    noContinue: 'Nothing to continue yet — open a book first',
+    libFilter: 'Filter by title…',
+    libRecent: 'Recent',
+    libForget: 'Remove from recent',
+    endTitle: 'The end',
+    endLibrary: 'To the library',
+    endClose: 'Close',
+    cmdFontBigger: 'Increase font size',
+    cmdFontSmaller: 'Decrease font size',
     cmdImport: 'Import book to Markdown (fb2, epub, txt)…',
     menuConvert: 'Convert to Markdown',
     convertStart: 'Converting…',
@@ -175,7 +191,10 @@ const STRINGS = {
     notePickPlaceholder: 'Какую заметку добавить в библиотеку…',
     cmdOpen: 'Открыть текущую заметку в MD Reader',
     menuOpen: 'Открыть в MD Reader',
-    settingsTitle: 'MD Reader',
+    sSecPage: 'Страница',
+    sSecText: 'Текст',
+    sSecColour: 'Цвет',
+    sSecReading: 'Чтение',
     sPageMode: 'Режим страниц',
     sPageModeDesc: 'Сколько страниц показывать на экране',
     optAuto: 'Авто (две на широком экране, одна на узком)',
@@ -228,7 +247,7 @@ const STRINGS = {
     sHideBar: 'Прятать системную панель (моб.)',
     sHideBarDesc: 'При чтении на телефоне прятать и системную панель ОС (часы, уведомления). Экспериментально — может не работать на некоторых устройствах',
     sJustify: 'Выравнивание по ширине',
-    sJustifyDesc: 'Ровнять абзацы по обоим краям, с переносами там, где их поддерживает платформа',
+    sJustifyDesc: 'Ровнять абзацы по обоим краям, с переносами там, где их поддерживает платформа (в десктопной сборке словарей переносов нет). Вёрстка страницы при этом дороже примерно в полтора раза — на медленной машине выключать в первую очередь',
     sPadding: 'Вертикальные поля, em',
     sPaddingDesc: 'Пустое место сверху и снизу страницы',
     cmdTint: 'Переключить тонировку страницы',
@@ -251,7 +270,20 @@ const STRINGS = {
     bmNone: 'В этой заметке пока нет закладок',
     bmAdded: 'Закладка поставлена',
     bmRemoved: 'Закладка снята',
-    chapterShort: 'гл',
+    menuAppearance: 'Оформление',
+    cmdAppearance: 'Оформление: шрифт, тонировка, поля',
+    menuBack: 'Назад, где читал',
+    cmdContinue: 'Продолжить чтение',
+    libContinue: 'Продолжить',
+    noContinue: 'Пока нечего продолжать — сначала откройте книгу',
+    libFilter: 'Фильтр по названию…',
+    libRecent: 'Недавнее',
+    libForget: 'Убрать из недавнего',
+    endTitle: 'Конец',
+    endLibrary: 'В библиотеку',
+    endClose: 'Закрыть',
+    cmdFontBigger: 'Увеличить шрифт',
+    cmdFontSmaller: 'Уменьшить шрифт',
     cmdImport: 'Импортировать книгу в Markdown (fb2, epub, txt)…',
     menuConvert: 'Конвертировать в Markdown',
     convertStart: 'Конвертирую…',
@@ -356,7 +388,7 @@ class BookmarkSuggestModal extends SuggestModal {
       this.inputEl.dispatchEvent(new Event('input'));
     });
   }
-  onChooseSuggestion(b) { this.view.goToG(b.g); }
+  onChooseSuggestion(b) { this.view.pushJump(); this.view.goToG(b.g); }
 }
 
 /* ============================================================
@@ -366,45 +398,94 @@ class LibraryModal extends Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
+    this.query = '';
   }
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.addClass('hr-lib');
-    contentEl.createEl('h3', { text: t('libTitle') });
+    // штатный заголовок модалки (titleEl есть во всех версиях API, в отличие от setTitle)
+    this.titleEl.setText(t('libTitle'));
+    this.items = this.plugin.libraryFiles();
 
-    // сначала список (последняя читанная сверху), действия — внизу
-    const items = this.plugin.libraryFiles();
-    if (!items.length) contentEl.createDiv('hr-lib-empty').setText(t('libEmpty'));
+    // «Продолжить» — то, зачем библиотеку открывают чаще всего: вернуться в книгу
+    const last = this.plugin.lastReadFile();
+    if (last) {
+      const btn = contentEl.createEl('button', { cls: 'hr-lib-continue mod-cta' });
+      btn.createSpan({ cls: 'hr-lib-continue-label', text: t('libContinue') });
+      btn.createSpan({ cls: 'hr-lib-continue-name', text: last.basename });
+      btn.addEventListener('click', () => { this.close(); this.plugin.openReader(last); });
+    }
 
-    const list = contentEl.createDiv('hr-lib-list');
-    items.forEach(({ file, registered }) => {
-      const row = list.createDiv('hr-lib-row');
-      row.createSpan({ cls: 'hr-lib-title', text: file.basename });
-      const pos = this.plugin.db[file.path];
-      const g = pos && (typeof pos.g === 'number' ? pos.g : pos.fraction);
-      if (typeof g === 'number') row.createSpan({ cls: 'hr-lib-pct', text: Math.round(g * 100) + '%' });
-      if (registered) {
-        // добавленные вручную можно убрать из списка (сам файл не трогаем)
-        const x = row.createSpan({ cls: 'hr-lib-x', attr: { 'aria-label': t('libRemove') } });
-        x.setText('✕');
-        x.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this.plugin.removeFromLibrary(file.path);
-          row.remove();
-        });
-      }
-      row.addEventListener('click', () => { this.close(); this.plugin.openReader(file); });
-    });
+    // фильтр — только когда список уже не окинуть взглядом. Фокус НЕ ставим:
+    // на телефоне это сразу выкинуло бы клавиатуру поверх половины списка
+    if (this.items.length > 8) {
+      const inp = contentEl.createEl('input', {
+        cls: 'hr-lib-filter',
+        attr: { type: 'search', placeholder: t('libFilter') },
+      });
+      inp.addEventListener('input', () => {
+        this.query = inp.value.toLowerCase().trim();
+        this.renderList();
+      });
+    }
+
+    this.listEl = contentEl.createDiv('hr-lib-list');
+    this.renderList();
 
     const actions = contentEl.createDiv('hr-lib-actions');
-    const impBtn = actions.createEl('button', { text: t('libImport'), cls: 'mod-cta' });
+    const impBtn = actions.createEl('button', { text: t('libImport') });
     impBtn.addEventListener('click', () => { this.close(); this.plugin.importBook(); });
     const addBtn = actions.createEl('button', { text: t('libAddNote') });
     addBtn.addEventListener('click', () => {
       this.close();
       new NotePickModal(this.app, this.plugin, (f) => this.plugin.addToLibrary(f.path)).open();
     });
+  }
+
+  renderList() {
+    const list = this.listEl;
+    list.empty();
+    const items = this.query
+      ? this.items.filter((x) => x.file.basename.toLowerCase().includes(this.query))
+      : this.items;
+    if (!items.length) {
+      list.createDiv('hr-lib-empty').setText(this.query ? t('tocEmpty') : t('libEmpty'));
+      return;
+    }
+    items.forEach((entry) => this.renderRow(list, entry));
+  }
+
+  renderRow(list, entry) {
+    const { file, registered, recent } = entry;
+    const row = list.createDiv('hr-lib-row');
+    const main = row.createDiv('hr-lib-main');
+    const head = main.createDiv('hr-lib-head');
+    head.createSpan({ cls: 'hr-lib-title', text: file.basename });
+    // «недавнее» — заметка не из библиотеки, а из истории чтения; помечаем, чтобы
+    // было понятно, почему она в списке
+    if (recent) head.createSpan({ cls: 'hr-lib-tag', text: t('libRecent') });
+    const pos = this.plugin.db[file.path];
+    const g = pos && (typeof pos.g === 'number' ? pos.g : pos.fraction);
+    if (typeof g === 'number') {
+      head.createSpan({ cls: 'hr-lib-pct', text: Math.round(g * 100) + '%' });
+      const bar = main.createDiv('hr-lib-bar');
+      // ширина — единственное, что тут может быть только инлайном
+      bar.createDiv('hr-lib-bar-fill').style.width = Math.max(2, Math.round(g * 100)) + '%';
+    }
+    if (registered || recent) {
+      // добавленное вручную убираем из списка, «недавнее» — из истории чтения.
+      // Сам файл в обоих случаях остаётся на месте
+      const x = row.createSpan({ cls: 'hr-lib-x', attr: { 'aria-label': recent ? t('libForget') : t('libRemove') } });
+      x.setText('✕');
+      x.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (recent) this.plugin.forgetPosition(file.path);
+        else this.plugin.removeFromLibrary(file.path);
+        this.items = this.items.filter((it) => it.file.path !== file.path);
+        row.remove();
+      });
+    }
+    row.addEventListener('click', () => { this.close(); this.plugin.openReader(file); });
   }
 
   onClose() { this.contentEl.empty(); }
@@ -420,7 +501,8 @@ class NotePickModal extends SuggestModal {
   }
   getSuggestions(query) {
     const q = query.toLowerCase().trim();
-    const inLib = new Set(this.plugin.libraryFiles().map((x) => x.file.path));
+    // «недавнее» из списка не исключаем: такую заметку как раз и хочется закрепить
+    const inLib = new Set(this.plugin.libraryFiles().filter((x) => !x.recent).map((x) => x.file.path));
     let files = this.app.vault.getMarkdownFiles().filter((f) => !inLib.has(f.path));
     if (q) files = files.filter((f) => f.path.toLowerCase().includes(q));
     return files.sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 200);
@@ -436,15 +518,97 @@ class NotePickModal extends SuggestModal {
 }
 
 /* ============================================================
+   Appearance — the settings you actually change while reading, one tap away.
+   На телефоне ридер живёт в иммерсивном режиме: чтобы добраться оттуда до
+   настроек плагина, надо вернуть весь интерфейс и уйти из книги.
+   ============================================================ */
+class AppearanceModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass('hr-ap');
+    this.titleEl.setText(t('menuAppearance'));
+    const p = this.plugin;
+    const save = () => { p.saveAll(); p.refreshOpenViews(); };
+
+    // размер шрифта — двумя большими кнопками: это то, ради чего сюда заходят,
+    // а ползунок в модалке пальцем не поймать
+    const size = contentEl.createDiv('hr-ap-size');
+    size.createSpan({ cls: 'hr-ap-name', text: t('sFontSize') });
+    const smaller = size.createEl('button', { cls: 'hr-ap-step hr-ap-small', text: 'A' });
+    const value = size.createSpan({ cls: 'hr-ap-value' });
+    const bigger = size.createEl('button', { cls: 'hr-ap-step hr-ap-big', text: 'A' });
+    const showSize = () => value.setText(Math.round(p.settings.fontSize * 100) + '%');
+    showSize();
+    smaller.addEventListener('click', () => { p.stepFontSize(-1); showSize(); });
+    bigger.addEventListener('click', () => { p.stepFontSize(1); showSize(); });
+
+    // тонировка — кружками с самим цветом, а не списком названий
+    const tints = contentEl.createDiv('hr-ap-tints');
+    ['none'].concat(TINTS).forEach((name) => {
+      const b = tints.createEl('button', {
+        cls: 'hr-ap-tint hr-ap-tint-' + name,
+        attr: { 'aria-label': t(TINT_LABEL[name]) },
+      });
+      b.toggleClass('is-active', p.settings.tint === name);
+      b.addEventListener('click', () => {
+        p.settings.tint = name;
+        tints.querySelectorAll('.hr-ap-tint').forEach((el) => el.removeClass('is-active'));
+        b.addClass('is-active');
+        save();
+      });
+    });
+
+    const slider = (key, prop, min, max, step) => new Setting(contentEl)
+      .setName(t(key))
+      .addSlider((sl) => sl.setLimits(min, max, step).setValue(p.settings[prop])
+        .setDynamicTooltip()
+        .onChange((v) => { p.settings[prop] = v; save(); }));
+
+    slider('sLineHeight', 'lineHeight', 1.2, 2.4, 0.05);
+    slider('sPadding', 'verticalPadding', 0, 4, 0.1);
+    slider('sMaxWidth', 'maxPageWidth', 0, 1000, 20);
+    slider('sBrightness', 'brightness', 20, 100, 5);
+
+    new Setting(contentEl)
+      .setName(t('sPageMode'))
+      .addDropdown((d) => d.addOptions({
+        'auto': t('optAuto'),
+        'single': t('optSingle'),
+        'double': t('optDouble'),
+      }).setValue(p.settings.pageMode)
+        .onChange((v) => { p.settings.pageMode = v; save(); }));
+
+    new Setting(contentEl)
+      .setName(t('sJustify'))
+      .addToggle((tg) => tg.setValue(p.settings.justify)
+        .onChange((v) => { p.settings.justify = v; save(); }));
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+/* ============================================================
    Chapter splitting — big files are rendered one chapter at a time so the
    column layout doesn't choke; small notes stay a single chapter (as before).
    ============================================================ */
-// на телефоне блоки заметно меньше: рендер и колоночная раскладка на мобильном
-// в разы медленнее, чем на ПК. Закладки от этого не страдают — позиция хранится
-// глобальной долей книги (см. savePos), а не номером блока
-const CHAPTER_SPLIT_THRESHOLD = Platform.isMobile ? 120000 : 250000; // меньше — рендер целиком
-const CHAPTER_PACK_TARGET = Platform.isMobile ? 60000 : 200000;      // размер «блока рендера»
-const CHAPTER_CHUNK_TARGET = Platform.isMobile ? 45000 : 120000;     // куски секции больше лимита
+// Размер блока рендера. Замеры в Chromium (та же начинка, что у Obsidian) дают
+// РОВНО ЛИНЕЙНУЮ зависимость колоночной раскладки от объёма: ~0.28 мс на 1000
+// символов, то есть блок 200k = ~56 мс раскладки при каждом входе в него и при
+// каждом пересчёте — это и есть заметные подтормаживания на больших книгах.
+// Держим блок в районе 60k (~17 мс) — глазом уже не видно, а переходов между
+// блоками стало больше, но они почти бесплатны из-за кэша соседних блоков.
+// Закладки от размера блока не страдают: позиция хранится глобальной долей
+// книги (см. savePos), а не номером блока.
+// Это ЗАПАСНЫЕ значения — пока плагин не измерил скорость самой машины
+// (см. blockTargets/noteLayoutRate: на медленном железе блок ужимается сам).
+const CHAPTER_SPLIT_THRESHOLD = Platform.isMobile ? 60000 : 120000; // меньше — рендерим целиком
+const CHAPTER_PACK_TARGET = Platform.isMobile ? 40000 : 60000;      // размер «блока рендера»
+const CHAPTER_CHUNK_TARGET = Platform.isMobile ? 30000 : 45000;     // куски секции больше лимита
 
 // нормализовать текст заголовка, чтобы сравнивать исходник с отрисованным DOM:
 // снять инлайн-разметку, ссылки и экранирование, схлопнуть пробелы
@@ -525,14 +689,18 @@ function chunkBySize(text, target) {
 // Стратегия: режем тело по КАЖДОМУ заголовку любого уровня на «секции», затем ПАКУЕМ
 // подряд идущие секции в блоки рендера ≤ PACK_TARGET. Так один блок не бывает слишком
 // большим (нет тормозов даже у книг с огромными томами), а перерисовок мало.
-function splitChapters(body) {
-  if (body.length <= CHAPTER_SPLIT_THRESHOLD) {
+function splitChapters(body, targets) {
+  const T = targets || {};
+  const SPLIT = T.split > 0 ? T.split : CHAPTER_SPLIT_THRESHOLD;
+  const PACK = T.pack > 0 ? T.pack : CHAPTER_PACK_TARGET;
+  const CHUNK = T.chunk > 0 ? T.chunk : CHAPTER_CHUNK_TARGET;
+  if (body.length <= SPLIT) {
     return { chapters: [body], toc: tocFromBody(body, 0), chars: [body.length] };
   }
   const lines = body.split('\n');
   const headings = scanHeadings(lines);
   if (!headings.length) {
-    const chunks = chunkBySize(body, CHAPTER_CHUNK_TARGET);
+    const chunks = chunkBySize(body, CHUNK);
     return { chapters: chunks, toc: [], chars: chunks.map((c) => c.length) };
   }
 
@@ -560,9 +728,9 @@ function splitChapters(body) {
 
   for (const sec of sections) {
     // одиночная секция больше лимита — режем её по размеру, заголовок идёт с первым куском
-    if (sec.text.length > CHAPTER_PACK_TARGET) {
+    if (sec.text.length > PACK) {
       if (buf !== '') flush();
-      const pieces = chunkBySize(sec.text, CHAPTER_CHUNK_TARGET);
+      const pieces = chunkBySize(sec.text, CHUNK);
       pieces.forEach((piece, pi) => {
         buf = piece;
         if (pi === 0 && sec.heading >= 0) {
@@ -574,7 +742,7 @@ function splitChapters(body) {
       continue;
     }
     // не влезает в текущий блок — закрыть его и начать новый
-    if (buf !== '' && buf.length + sec.text.length > CHAPTER_PACK_TARGET) flush();
+    if (buf !== '' && buf.length + sec.text.length > PACK) flush();
     if (sec.heading >= 0) {
       const h = headings[sec.heading];
       toc.push({ text: h.text, level: h.level, chapter: curChapter, hIndex: curHCount });
@@ -585,6 +753,11 @@ function splitChapters(body) {
   flush();
 
   return { chapters, toc, chars: chapters.map((c) => c.length) };
+}
+
+// расстояние между двумя пальцами — основа щипка
+function touchDist(touches) {
+  return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
 }
 
 /* ============================================================
@@ -600,8 +773,6 @@ class ReaderView extends ItemView {
     this.page = 0;
     this.totalPages = 1;
     this.pageStride = 0;
-    this.colGap = 0;
-    this.spreadMode = false;
 
     this.renderChild = null;
     this.ro = null;
@@ -629,6 +800,17 @@ class ReaderView extends ItemView {
     // фоновая предзагрузка следующего блока (переход вперёд без ожидания рендера)
     this._prefetch = null;      // {index, el, comp, file}
     this._prefetchTimer = null;
+    this._prefetchIdle = 0;
+    this._prefetchWant = -1;
+    // кэш соседних блоков: index -> {el, comp, file}. Разобранный markdown дорог,
+    // держим по нему пару соседей, чтобы возврат назад не стоил ничего
+    this._cache = new Map();
+    this._blockReady = false;   // текущий блок отрисован целиком (можно класть в кэш)
+
+    this._jumps = [];         // доли, откуда прыгали (оглавление/поиск/закладка) — для «назад»
+    this._headPages = null;   // [{page, toc}] — заголовки текущего блока, для строки состояния
+    this._endEl = null;       // отбивка «Конец» на последней странице
+    this._statusEls = null;   // готовые узлы строки состояния (создаются в onOpen)
   }
 
   getViewType() { return VIEW_TYPE_READER; }
@@ -684,7 +866,13 @@ class ReaderView extends ItemView {
     // входа на телефоне: в иммерсивном режиме нижняя панель Obsidian спрятана,
     // и до палитры команд оттуда не добраться
     this.statusText = bar.createDiv('hr-status-text');
-    this.statusText.setText('1 / 1');
+    // три готовых узла на всю жизнь вьюхи: закладка, название главы, позиция.
+    // Пустые прячет CSS (span:empty), чтобы не оставалось лишних промежутков
+    this._statusEls = {
+      bm: this.statusText.createSpan({ cls: 'hr-status-bm' }),
+      chapter: this.statusText.createSpan({ cls: 'hr-status-chapter' }),
+      pos: this.statusText.createSpan({ cls: 'hr-status-pos', text: '1 / 1' }),
+    };
     this.statusText.setAttribute('aria-label', t('menuNav'));
     this.registerDomEvent(this.statusText, 'click', (e) => { e.stopPropagation(); this.openNavMenu(e); });
 
@@ -702,10 +890,12 @@ class ReaderView extends ItemView {
 
   async onClose() {
     this.popScope();
+    this.hideEnd();
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     if (this._repaginateTimer) { clearTimeout(this._repaginateTimer); this._repaginateTimer = null; }
     this.discardPrefetch();
+    this.clearCache();
     this.savePos();
     if (this.renderChild) { this.removeChild(this.renderChild); this.renderChild = null; }
     // Забыть ссылку на наш документ, если иммерсив висел на нём: это может быть
@@ -722,7 +912,10 @@ class ReaderView extends ItemView {
   async renderFile() {
     if (!this.content) return;
     this.discardPrefetch(); // предзагруженный блок относится к прежнему файлу
+    this.clearCache();      // и отложенные соседние блоки — тоже
     this._searchIndex = null;
+    this._jumps = [];       // «назад» — в пределах одной книги
+    this._blockReady = false;
     if (!this.file) {
       this.chapters = null; this.toc = []; this.chapterIndex = 0;
       this.content.empty();
@@ -742,7 +935,7 @@ class ReaderView extends ItemView {
     body = body.replace(/^\s+/, '');
 
     // разбить на главы (мелкие файлы → одна глава = весь текст) и посчитать метрики прогресса
-    const split = splitChapters(body);
+    const split = splitChapters(body, this.plugin.blockTargets());
     this.chapters = split.chapters;
     this.toc = split.toc;
     this.chapterChars = split.chars;
@@ -774,14 +967,18 @@ class ReaderView extends ItemView {
     if (!this.chapters || this.chapters.length < 2 || this.totalChars <= 0) return { chapter: 0, within: g };
     const target = g * this.totalChars;
     let ch = 0;
-    while (ch < this.chapters.length - 1 && this.charsBefore[ch] + this.chapterChars[ch] <= target) ch++;
+    // строго «<»: доля ровно на стыке блоков — это КОНЕЦ предыдущего (последняя
+    // страница, где человек и остановился), а не начало следующего
+    while (ch < this.chapters.length - 1 && this.charsBefore[ch] + this.chapterChars[ch] < target) ch++;
     const within = this.chapterChars[ch] > 0 ? (target - this.charsBefore[ch]) / this.chapterChars[ch] : 0;
     return { chapter: ch, within: Math.max(0, Math.min(1, within)) };
   }
 
-  // текущая позиция как глобальная доля книги (взвешенно по символам)
+  // текущая позиция как глобальная доля книги (взвешенно по символам).
+  // Единственная страница = блок прочитан целиком (1), как и показывает статус:
+  // иначе прочитанная заметка оставалась бы в библиотеке с «0 %»
   currentG() {
-    const within = this.totalPages > 1 ? this.page / (this.totalPages - 1) : 0;
+    const within = this.totalPages > 1 ? this.page / (this.totalPages - 1) : 1;
     if (this.chapters && this.chapters.length > 1 && this.totalChars > 0) {
       return ((this.charsBefore[this.chapterIndex] || 0) + within * (this.chapterChars[this.chapterIndex] || 0)) / this.totalChars;
     }
@@ -793,9 +990,16 @@ class ReaderView extends ItemView {
     if (!this.content || !this.file || !this.chapters) return;
     opts = opts || {};
     const gen = ++this._renderGen;
+    const from = this.chapterIndex;
     this.chapterIndex = Math.max(0, Math.min(index, this.chapters.length - 1));
+    this.hideEnd();
+    this._headPages = null;
 
+    // уходим из целиком отрисованного блока — откладываем его, а не выбрасываем.
+    // Недорисованный (прервали на середине) в кэш класть нельзя
+    if (this.renderChild && this._blockReady && from !== this.chapterIndex) this.stashBlock(from);
     if (this.renderChild) { this.removeChild(this.renderChild); this.renderChild = null; }
+    this._blockReady = false;
 
     this.content.empty();
     this.content.style.transform = 'translateX(0px)';
@@ -805,10 +1009,14 @@ class ReaderView extends ItemView {
     this._pendingFind = opts.find || null;
     this._pendingFraction = (opts.heading || opts.find) ? 0 : (opts.fraction || 0);
 
-    // блок уже подготовлен фоновой предзагрузкой — вставляем готовый DOM без
-    // повторного markdown-рендера (главный источник паузы на телефоне)
+    // блок уже разобран — отложен при уходе назад или подготовлен предзагрузкой.
+    // Вставляем готовый DOM без повторного markdown-рендера (самая дорогая часть)
+    const cached = this.takeCached(this.chapterIndex);
     const pf = this._prefetch;
-    if (pf && pf.ready && pf.index === this.chapterIndex && pf.file === this.file.path) {
+    if (cached) {
+      this.renderChild = cached.comp; // компонент всё это время жил в addChild
+      while (cached.el.firstChild) this.content.appendChild(cached.el.firstChild);
+    } else if (pf && pf.ready && pf.index === this.chapterIndex && pf.file === this.file.path) {
       this._prefetch = null;
       this.renderChild = pf.comp; // уже addChild-нут при предзагрузке
       while (pf.el.firstChild) this.content.appendChild(pf.el.firstChild);
@@ -822,6 +1030,7 @@ class ReaderView extends ItemView {
       }
       if (gen !== this._renderGen) return;
     }
+    this._blockReady = true;
 
     // заголовок-имя файла — только на первой главе и только если нет своего H1
     if (this.plugin.settings.showTitle && this.chapterIndex === 0) {
@@ -856,15 +1065,82 @@ class ReaderView extends ItemView {
     if (this.leaf && this.leaf.updateHeader) this.leaf.updateHeader();
   }
 
+  /* ---------- кэш соседних блоков ---------- */
+  // Разбор markdown — самая дорогая часть перехода, а назад листают постоянно.
+  // Уходя из блока, прячем его узлы в открепленный контейнер: при возврате
+  // останется только раскладка (десяток миллисекунд на нынешнем размере блока)
+  stashBlock(index) {
+    if (!this.renderChild || !this.content || !this.file) return;
+    this.dropCached(index); // перезаписывать запись нельзя: старый компонент остался бы висеть
+    const el = document.createElement('div');
+    while (this.content.firstChild) el.appendChild(this.content.firstChild);
+    this._cache.set(index, { el, comp: this.renderChild, file: this.file.path });
+    this.renderChild = null;
+    this.trimCache(index);
+  }
+
+  takeCached(index) {
+    const hit = this._cache.get(index);
+    if (!hit || !this.file || hit.file !== this.file.path) return null;
+    this._cache.delete(index);
+    return hit;
+  }
+
+  // держим только ближайших соседей: дальше по книге они всё равно не пригодятся,
+  // а память на разобранных узлах книги — не бесплатная
+  trimCache(around) {
+    Array.from(this._cache.keys())
+      .sort((a, b) => Math.abs(a - around) - Math.abs(b - around))
+      .slice(2)
+      .forEach((i) => this.dropCached(i));
+  }
+
+  dropCached(index) {
+    const rec = this._cache.get(index);
+    if (!rec) return;
+    this._cache.delete(index);
+    this.removeChild(rec.comp);
+  }
+
+  clearCache() { Array.from(this._cache.keys()).forEach((i) => this.dropCached(i)); }
+
   /* ---------- background prefetch of the next block ---------- */
   schedulePrefetch() {
     if (!this.chapters || this.chapters.length < 2 || !this.file) return;
     const want = this.chapterIndex + 1;
     if (want >= this.chapters.length) return;
     if (this._prefetch && this._prefetch.index === want && this._prefetch.file === this.file.path) return;
-    if (this._prefetchTimer) clearTimeout(this._prefetchTimer);
-    // небольшая пауза: не мешать анимации листания и не рендерить зря при частых кликах
-    this._prefetchTimer = setTimeout(() => { this._prefetchTimer = null; this.prefetchChapter(want); }, 300);
+    if (this._cache.has(want)) return; // следующий блок уже разобран и отложен
+    // не рендерим следующий блок, пока читают начало текущего: это работа впустую,
+    // а её пауза приходится ровно на момент, когда человек только вошёл в блок
+    if (this.totalPages > 3 && this.page < (this.totalPages - 1) * 0.4) return;
+    // уже запланировали этот же блок — метод зовётся на каждое перелистывание
+    if (this._prefetchWant === want && (this._prefetchTimer || this._prefetchIdle)) return;
+    this.cancelPrefetchTimer();
+    this._prefetchWant = want;
+    // ждём простоя главного потока: разбор markdown блокирующий, и посреди чтения
+    // он ощущается как рывок. requestIdleCallback есть в Electron, на всякий
+    // случай оставлен запасной таймер
+    const start = () => {
+      this._prefetchTimer = null;
+      this._prefetchIdle = 0;
+      this._prefetchWant = -1;
+      this.prefetchChapter(want);
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      this._prefetchIdle = window.requestIdleCallback(start, { timeout: 2000 });
+    } else {
+      this._prefetchTimer = setTimeout(start, 300);
+    }
+  }
+
+  cancelPrefetchTimer() {
+    if (this._prefetchTimer) { clearTimeout(this._prefetchTimer); this._prefetchTimer = null; }
+    if (this._prefetchIdle && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(this._prefetchIdle);
+    }
+    this._prefetchIdle = 0;
+    this._prefetchWant = -1;
   }
 
   async prefetchChapter(index) {
@@ -878,14 +1154,19 @@ class ReaderView extends ItemView {
     try {
       await MarkdownRenderer.render(this.app, this.chapters[index] || '', el, this.file.path, comp);
     } catch (e) { /* не критично: при переходе отрендерим обычным путём */ }
-    // за время рендера ситуация могла смениться (другой файл/блок) — выбросить
-    if (this._prefetch !== entry) { this.removeChild(comp); return; }
+    // за время рендера ситуация могла смениться (другой файл/блок) — выбросить.
+    // Если его уже выбросил discardPrefetch, второй раз удалять компонент нельзя
+    if (this._prefetch !== entry) { if (!entry.gone) this.removeChild(comp); return; }
     entry.ready = true;
   }
 
   discardPrefetch() {
-    if (this._prefetchTimer) { clearTimeout(this._prefetchTimer); this._prefetchTimer = null; }
-    if (this._prefetch) { this.removeChild(this._prefetch.comp); this._prefetch = null; }
+    this.cancelPrefetchTimer();
+    if (this._prefetch) {
+      this._prefetch.gone = true;
+      this.removeChild(this._prefetch.comp);
+      this._prefetch = null;
+    }
   }
 
   /* ---------- measure & paginate (set content width AND column width together) ---------- */
@@ -910,19 +1191,23 @@ class ReaderView extends ItemView {
     if (pageW > maxPage) pageW = maxPage;
 
     const stageW = n * pageW + gap * (n - 1);
-    this.spreadMode = n === 2;
 
     this.stage.style.width = stageW + 'px';
     this.stage.classList.toggle('hr-two', n === 2);
     this.content.style.width = stageW + 'px';
     this.content.style.columnWidth = pageW + 'px';
 
-    this.colGap = gap;
     this.pageStride = stageW + gap;
 
+    // чтение scrollWidth = принудительная раскладка колонок, самая дорогая
+    // операция ридера. Заодно засекаем её: по этому времени плагин подбирает
+    // размер блока под конкретную машину (см. blockTargets)
+    const tLayout = performance.now();
     const sw = this.content.scrollWidth;
+    this.plugin.noteLayoutRate(performance.now() - tLayout, this.chapterChars[this.chapterIndex] || 0);
     this.totalPages = Math.max(1, Math.round((sw + gap) / this.pageStride));
     this._measured = true;
+    this.indexHeadingPages();
 
     // не финализируем восстановление позиции, пока грузятся картинки: они меняют
     // высоту и число страниц, поэтому долю/прыжок применяем заново после каждой догрузки
@@ -978,9 +1263,13 @@ class ReaderView extends ItemView {
   goTo(p) {
     const np = Math.max(0, Math.min(p, this.totalPages - 1));
     this.page = isFinite(np) ? np : 0;
+    this.hideEnd();
     this.applyTransform();
     this.updateStatus();
     this.savePos();
+    // подготовка следующего блока начинается ближе к концу текущего — проверяем
+    // на каждом перелистывании (внутри дешёвые отсечки)
+    this.schedulePrefetch();
   }
   next() {
     if (this.page < this.totalPages - 1) { this.goTo(this.page + 1); return; }
@@ -988,7 +1277,9 @@ class ReaderView extends ItemView {
     if (this.chapters && this.chapterIndex < this.chapters.length - 1) {
       this.savePos();
       this.renderChapter(this.chapterIndex + 1, { fraction: 0 });
+      return;
     }
+    this.showEnd();
   }
   prev() {
     if (this.page > 0) { this.goTo(this.page - 1); return; }
@@ -997,6 +1288,53 @@ class ReaderView extends ItemView {
       this.savePos();
       this.renderChapter(this.chapterIndex - 1, { fraction: 1 });
     }
+  }
+
+  /* ---------- конец книги ---------- */
+  // листать дальше некуда: вместо «ничего не произошло» — отбивка и выход из книги
+  showEnd() {
+    if (!this.viewport || this._endEl || !this.file) return;
+    const box = this.viewport.createDiv('hr-end');
+    this._endEl = box;
+    box.createDiv({ cls: 'hr-end-title', text: t('endTitle') });
+    const row = box.createDiv('hr-end-actions');
+    const lib = row.createEl('button', { cls: 'mod-cta', text: t('endLibrary') });
+    lib.addEventListener('click', () => { this.hideEnd(); this.plugin.openLibrary(); });
+    row.createEl('button', { text: t('endClose') })
+      .addEventListener('click', () => this.hideEnd());
+    // мимо кнопок — тоже закрыть: отбивка не должна мешать перечитывать последнюю страницу
+    box.addEventListener('click', () => this.hideEnd());
+  }
+
+  hideEnd() {
+    if (this._endEl) { this._endEl.remove(); this._endEl = null; }
+  }
+
+  /* ---------- возврат после прыжка ---------- */
+  // откуда прыгнули по оглавлению / поиску / закладке — чтобы вернуться к чтению
+  pushJump() {
+    if (!this._measured || !this.chapters) return;
+    this._jumps.push(this.currentG());
+    if (this._jumps.length > 20) this._jumps.shift();
+  }
+
+  canJumpBack() { return this._jumps.length > 0; }
+
+  jumpBack() {
+    if (!this._jumps.length) return;
+    this.goToG(this._jumps.pop());
+  }
+
+  openAppearance() { new AppearanceModal(this.app, this.plugin).open(); }
+
+  // щипок двумя пальцами: показать новый размер сразу, страницы пересчитает
+  // общий дебаунс, а на диск сохраним по окончании жеста
+  previewFontSize(v) {
+    const size = Math.max(0.6, Math.min(2, Math.round(v * 20) / 20));
+    if (size === this.plugin.settings.fontSize) return;
+    this.plugin.settings.fontSize = size;
+    if (this.content) this.content.style.setProperty('--hr-font-size', size + 'em');
+    if (this._debouncedRemeasure) this._debouncedRemeasure();
   }
 
   /* ---------- table of contents ---------- */
@@ -1011,6 +1349,7 @@ class ReaderView extends ItemView {
   // переход по пункту оглавления: в текущей главе — сразу к элементу, иначе грузим нужную главу
   goToTocEntry(entry) {
     if (!entry || !this.chapters) return;
+    this.pushJump();
     if (entry.chapter === this.chapterIndex) {
       const el = this.resolveHeadingEl(entry.hIndex, entry.text);
       if (el) this.goToHeading(el);
@@ -1026,6 +1365,61 @@ class ReaderView extends ItemView {
     if (!this.content) return [];
     return Array.from(this.content.querySelectorAll('h1, h2, h3, h4, h5, h6'))
       .filter((e) => !e.classList.contains('hr-title') && !e.closest('.markdown-embed'));
+  }
+
+  // на какой странице начинается каждый заголовок текущего блока. Считаем один раз
+  // на замер: getBoundingClientRect по каждому заголовку — не то, что можно делать
+  // на каждое перелистывание
+  indexHeadingPages() {
+    this._headPages = null;
+    if (!this.toc || !this.toc.length || !this.content) return;
+    const mine = [];
+    for (let i = 0; i < this.toc.length; i++) if (this.toc[i].chapter === this.chapterIndex) mine.push(i);
+    if (!mine.length) return;
+    const els = this.headingEls();
+    if (!els.length) return;
+    // разметка совпала с исходником — берём по номеру; разошлась (HTML-заголовки,
+    // плагины-рендереры) — ищем по тексту, как и при прыжке из оглавления
+    const exact = els.length === mine.length;
+    const out = [];
+    mine.forEach((tocIndex, k) => {
+      const entry = this.toc[tocIndex];
+      const el = exact ? els[k] : this.resolveHeadingEl(entry.hIndex, entry.text);
+      if (el) out.push({ page: this.pageOfRect(el.getBoundingClientRect()), toc: tocIndex });
+    });
+    out.sort((a, b) => a.page - b.page);
+    this._headPages = out.length ? out : null;
+  }
+
+  // подпись места для строки состояния: последний заголовок, начавшийся не позже
+  // текущей страницы. Короткий номер («IX») сам по себе ни о чём не говорит —
+  // дополняем его ближайшим заголовком старшего уровня («Часть вторая · IX»)
+  currentChapterLabel() {
+    if (!this.toc || !this.toc.length) return '';
+    let idx = -1;
+    if (this._headPages) {
+      for (const h of this._headPages) { if (h.page > this.page) break; idx = h.toc; }
+    }
+    if (idx < 0) {
+      // в этом блоке заголовков до текущей страницы не было — берём последний из прошлых
+      for (let i = this.toc.length - 1; i >= 0; i--) {
+        if (this.toc[i].chapter < this.chapterIndex) { idx = i; break; }
+      }
+    }
+    if (idx < 0) return '';
+    const cur = this.toc[idx];
+    let label = String(cur.text || '').trim();
+    if (!label) return '';
+    if (label.length <= 8) {
+      for (let i = idx - 1; i >= 0; i--) {
+        if (this.toc[i].level < cur.level) {
+          const up = String(this.toc[i].text || '').trim();
+          if (up) label = up + ' · ' + label;
+          break;
+        }
+      }
+    }
+    return label.length > 48 ? label.slice(0, 47).trim() + '…' : label;
   }
 
   // элемент заголовка по номеру из оглавления. Номер — лишь подсказка: сначала ищем
@@ -1052,6 +1446,11 @@ class ReaderView extends ItemView {
     const menu = new Menu();
     menu.addItem((i) => i.setTitle(t('menuToc')).setIcon('list').onClick(() => this.openToc()));
     menu.addItem((i) => i.setTitle(t('menuSearch')).setIcon('search').onClick(() => this.openSearch()));
+    if (this.canJumpBack()) {
+      menu.addItem((i) => i.setTitle(t('menuBack')).setIcon('arrow-left').onClick(() => this.jumpBack()));
+    }
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle(t('menuAppearance')).setIcon('type').onClick(() => this.openAppearance()));
     menu.addSeparator();
     const here = this.bookmarkOnPage();
     menu.addItem((i) => i
@@ -1077,13 +1476,14 @@ class ReaderView extends ItemView {
     new BookSearchModal(this.app, this).open();
   }
 
-  // главы в нижнем регистре — считаем один раз на файл (у книги это мегабайты)
-  searchLower() {
+  // блок в нижнем регистре. Лениво, по одному: у книги это мегабайты, а поиск
+  // обычно упирается в лимит совпадений задолго до конца текста
+  lowerChapter(i) {
     const path = this.file ? this.file.path : '';
-    if (!this._searchIndex || this._searchIndex.path !== path) {
-      this._searchIndex = { path, low: (this.chapters || []).map((c) => c.toLowerCase()) };
-    }
-    return this._searchIndex.low;
+    if (!this._searchIndex || this._searchIndex.path !== path) this._searchIndex = { path, low: [] };
+    const low = this._searchIndex.low;
+    if (low[i] === undefined) low[i] = String(this.chapters[i] || '').toLowerCase();
+    return low[i];
   }
 
   // ищем по ИСХОДНОМУ markdown всех блоков: так находки есть и в неотрисованных
@@ -1092,11 +1492,10 @@ class ReaderView extends ItemView {
     const q = String(query || '').trim().toLowerCase();
     const out = [];
     if (q.length < 2 || !this.chapters) return out;
-    const low = this.searchLower();
     const LIMIT = 200;
     const clean = (s) => s.replace(/\s+/g, ' ');
-    for (let ch = 0; ch < low.length && out.length < LIMIT; ch++) {
-      const hay = low[ch];
+    for (let ch = 0; ch < this.chapters.length && out.length < LIMIT; ch++) {
+      const hay = this.lowerChapter(ch);
       const src = this.chapters[ch];
       let idx = hay.indexOf(q);
       let ord = 0;
@@ -1123,6 +1522,7 @@ class ReaderView extends ItemView {
 
   goToHit(hit) {
     if (!hit || !this.chapters) return;
+    this.pushJump();
     const find = { query: hit.q, ordinal: hit.ordinal, fraction: hit.fraction };
     if (hit.chapter !== this.chapterIndex) {
       this.savePos();
@@ -1315,13 +1715,22 @@ class ReaderView extends ItemView {
       frac = (before + withinFrac * chars) / this.totalChars;
     }
     const pct = Math.round(frac * 100);
-    if (this.statusText) {
+    if (this._statusEls) {
       // книга (много блоков) — только общий % (номер блока — деталь реализации, не «глава»);
-      // обычная заметка — как раньше, «страница / всего · %»
+      // обычная заметка — как раньше, «страница / всего · %».
+      // Правим текст в готовых узлах: строка состояния обновляется на КАЖДОМ
+      // листании, и пересборка трёх элементов каждый раз — лишняя работа
+      const e = this._statusEls;
       const base = multi ? pct + '%' : ((this.page + 1) + ' / ' + this.totalPages + ' · ' + pct + '%');
-      this.statusText.setText((this.bookmarkOnPage() ? '🔖 ' : '') + base);
+      const bm = this.bookmarkOnPage() ? '🔖' : '';
+      const label = this.currentChapterLabel();
+      if (e.bm.textContent !== bm) e.bm.textContent = bm;
+      if (e.chapter.textContent !== label) e.chapter.textContent = label;
+      if (e.pos.textContent !== base) e.pos.textContent = base;
     }
-    if (this.progressFill) this.progressFill.style.width = (frac * 100) + '%';
+    // scaleX, а не width: ширина — свойство раскладки, и её переход заставлял
+    // браузер пересчитывать полосу все 200 мс каждого листания
+    if (this.progressFill) this.progressFill.style.transform = 'scaleX(' + frac + ')';
   }
 
   savePos() {
@@ -1347,6 +1756,12 @@ class ReaderView extends ItemView {
     const s = this.plugin.settings;
     const c = this.content;
     if (!c) return;
+    // ЧИТАЕМ до всех записей стилей. Обе величины от наших стилей не зависят
+    // (высота строки состояния и шрифт вьюпорта — от темы), а чтение после
+    // записи заставляло браузер считать раскладку лишний раз: раньше каждый
+    // пересчёт страниц стоил двух проходов вместо одного
+    const barH = this.statusBar ? this.statusBar.offsetHeight : 0;
+    const rootPx = this.viewport ? (parseFloat(getComputedStyle(this.viewport).fontSize) || 16) : 16;
     // шрифт чтения: пусто — берём шрифт темы (переменная просто не задана)
     const ff = s.fontFamily === 'custom' ? (s.fontFamilyCustom || '').trim() : (READING_FONTS[s.fontFamily] || '');
     if (ff) c.style.setProperty('--hr-font-family', ff);
@@ -1376,10 +1791,10 @@ class ReaderView extends ItemView {
     // страницы, и при малом значении ползунка последняя строка пряталась под
     // полосой прогресса. Высоту меряем, а не хардкодим — она зависит от шрифта темы
     let bottomEm = padY + 0.6;
-    if (this.statusBar) {
-      const barH = this.statusBar.offsetHeight;
-      const emPx = parseFloat(getComputedStyle(c).fontSize) || 16;
-      const minEm = barH > 0 ? (barH + 4) / emPx : 0;
+    if (barH > 0) {
+      // em страницы = шрифт вьюпорта, умноженный на наш множитель (--hr-font-size)
+      const emPx = rootPx * (typeof s.fontSize === 'number' ? s.fontSize : 1);
+      const minEm = emPx > 0 ? (barH + 4) / emPx : 0;
       if (minEm > bottomEm) bottomEm = minEm;
     }
     c.style.paddingBottom = bottomEm + 'em';
@@ -1406,6 +1821,9 @@ class ReaderView extends ItemView {
         if (!isFinite(this.page)) this.page = 0;
         this.applyTransform();
         this.updateStatus();
+        // measure() сохранился с промежуточной страницей (её ещё не пересчитали
+        // из доли) — перезаписать позицию окончательной
+        this.savePos();
       }, 150);
     };
     this._debouncedRemeasure = repaginate;
@@ -1447,8 +1865,15 @@ class ReaderView extends ItemView {
     reg([], 'Home', () => this.goTo(0));
     reg([], 'End', () => this.goTo(this.totalPages - 1));
     reg([], 'Escape', () => this.exitReadingChrome());
+    reg([], 'Backspace', () => this.jumpBack());
+    reg(['Alt'], 'ArrowLeft', () => this.jumpBack());
     reg(['Mod'], 'f', () => this.openSearch());
     reg(['Mod'], 'b', () => this.toggleBookmark());
+    // размер шрифта страницы вместо масштаба всего окна: пока читаешь, нужен именно он
+    reg(['Mod'], '=', () => this.plugin.stepFontSize(1));
+    reg(['Mod'], '+', () => this.plugin.stepFontSize(1));          // цифровой блок
+    reg(['Mod', 'Shift'], '+', () => this.plugin.stepFontSize(1)); // основной ряд: + это Shift+=
+    reg(['Mod'], '-', () => this.plugin.stepFontSize(-1));
     this._scope = s;
     this._scopePushed = false;
   }
@@ -1472,6 +1897,7 @@ class ReaderView extends ItemView {
     // is handled by data-ignore-swipe + capture-phase stopPropagation.
     const OS_EDGE = 12, SWIPE = 45, CLAIM = 6, TAP_MOVE = 10, TAP_MS = 300;
     let x0 = 0, y0 = 0, t0 = 0, dragging = false, decided = false, horizontal = false;
+    let pinch = null; // {d0, base} — щипок меняет размер шрифта, а не масштаб окна
 
     const abortDrag = () => {
       if (dragging) {
@@ -1482,10 +1908,15 @@ class ReaderView extends ItemView {
     };
 
     const interactive = (tg) => !!(tg && tg.closest && tg.closest(
-      'a, input, button, textarea, select, [contenteditable], .task-list-item-checkbox, .callout-fold, .footnote-link, audio, video, .hr-ui'
+      'a, input, button, textarea, select, [contenteditable], .task-list-item-checkbox, .callout-fold, .footnote-link, audio, video, .hr-ui, .hr-end'
     ));
 
     this.registerDomEvent(vp, 'touchstart', (e) => {
+      if (e.touches.length === 2) {
+        abortDrag();
+        pinch = { d0: touchDist(e.touches), base: this.plugin.settings.fontSize };
+        return;
+      }
       if (e.touches.length !== 1) { abortDrag(); return; }
       const tc = e.touches[0];
       const win = (vp.ownerDocument && vp.ownerDocument.defaultView) || window;
@@ -1496,6 +1927,13 @@ class ReaderView extends ItemView {
     }, { capture: true, passive: true });
 
     this.registerDomEvent(vp, 'touchmove', (e) => {
+      if (pinch) {
+        if (e.touches.length < 2) return;
+        e.stopPropagation();
+        e.preventDefault();
+        if (pinch.d0 > 0) this.previewFontSize(pinch.base * (touchDist(e.touches) / pinch.d0));
+        return;
+      }
       if (!dragging) return;
       const tc = e.touches[0];
       const dx = tc.clientX - x0, dy = tc.clientY - y0;
@@ -1512,6 +1950,11 @@ class ReaderView extends ItemView {
     }, { capture: true, passive: false });
 
     const endTouch = (e) => {
+      if (pinch) {
+        // палец оторвали — жест кончился, теперь можно сохранить размер на диск
+        if (e.touches.length < 2) { pinch = null; this._lastTouch = Date.now(); this.plugin.commitFontSize(); }
+        return;
+      }
       if (!dragging) return;
       dragging = false;
       this._lastTouch = Date.now();
@@ -1538,17 +1981,36 @@ class ReaderView extends ItemView {
       decided = false; horizontal = false;
     };
     this.registerDomEvent(vp, 'touchend', endTouch, { capture: true, passive: true });
-    this.registerDomEvent(vp, 'touchcancel', () => abortDrag(), { capture: true, passive: true });
+    this.registerDomEvent(vp, 'touchcancel', () => { pinch = null; abortDrag(); }, { capture: true, passive: true });
+
+    // мышью по странице ещё и ВЫДЕЛЯЮТ текст: клик в конце протяжки не должен
+    // листать (иначе выделил цитату — и уехал со страницы)
+    let downX = 0, downY = 0;
+    this.registerDomEvent(vp, 'mousedown', (e) => { downX = e.clientX; downY = e.clientY; });
 
     this.registerDomEvent(vp, 'click', (e) => {
       if (this._lastTouch && Date.now() - this._lastTouch < 700) return;
       if (interactive(e.target)) return;
       if (!this.plugin.settings.tapZones) return;
+      if (e.detail > 1) return; // двойной/тройной клик — это выделение слова или абзаца
+      if (Math.abs(e.clientX - downX) > 6 || Math.abs(e.clientY - downY) > 6) return;
+      const sel = (vp.ownerDocument || document).getSelection();
+      if (sel && !sel.isCollapsed && sel.anchorNode && vp.contains(sel.anchorNode)) return;
       const r = vp.getBoundingClientRect();
       const x = e.clientX - r.left, w = vp.clientWidth;
       if (x < w * 0.3) this.prev();
       else if (x > w * 0.7) this.next();
       else this.toggleControls();
+    });
+
+    // A/D — то же самое, что стрелки. Ловим по e.code, а не через Scope по key:
+    // на русской раскладке key будет «ф» и «в», а code остаётся KeyA/KeyD
+    this.registerDomEvent(vp, 'keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.code !== 'KeyA' && e.code !== 'KeyD') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code === 'KeyA') this.prev(); else this.next();
     });
 
     if (Platform.isDesktop) {
@@ -1559,7 +2021,9 @@ class ReaderView extends ItemView {
         e.preventDefault();
         if (wheelLock) return;
         wheelLock = true;
-        setTimeout(() => { wheelLock = false; }, 350);
+        // ровно столько, чтобы одна прокрутка колеса не улистнула три страницы;
+        // больше — и листание колесом само по себе кажется тормозящим
+        setTimeout(() => { wheelLock = false; }, 200);
         if (d > 0) this.next(); else this.prev();
       }, { passive: false });
     }
@@ -1578,12 +2042,16 @@ class ReaderSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl('h3', { text: t('settingsTitle') });
 
     const save = async () => {
       await this.plugin.saveAll();
       this.plugin.refreshOpenViews();
     };
+    // разделы вместо сплошного списка: настроек два десятка, и половина из них
+    // про одно и то же (геометрия страницы / текст / цвет / поведение)
+    const section = (key) => new Setting(containerEl).setName(t(key)).setHeading();
+
+    section('sSecPage');
 
     new Setting(containerEl)
       .setName(t('sPageMode'))
@@ -1600,6 +2068,19 @@ class ReaderSettingTab extends PluginSettingTab {
       .setDesc(t('sMaxWidthDesc'))
       .addSlider((sl) => sl.setLimits(0, 1000, 20).setValue(this.plugin.settings.maxPageWidth)
         .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxPageWidth = v; await save(); }));
+
+    new Setting(containerEl)
+      .setName(t('sGap'))
+      .addSlider((sl) => sl.setLimits(0.5, 5, 0.25).setValue(this.plugin.settings.columnGap)
+        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.columnGap = v; await save(); }));
+
+    new Setting(containerEl)
+      .setName(t('sPadding'))
+      .setDesc(t('sPaddingDesc'))
+      .addSlider((sl) => sl.setLimits(0, 4, 0.1).setValue(this.plugin.settings.verticalPadding)
+        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.verticalPadding = v; await save(); }));
+
+    section('sSecText');
 
     new Setting(containerEl)
       .setName(t('sFontSize'))
@@ -1630,6 +2111,19 @@ class ReaderSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl)
+      .setName(t('sLineHeight'))
+      .addSlider((sl) => sl.setLimits(1.2, 2.4, 0.05).setValue(this.plugin.settings.lineHeight)
+        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.lineHeight = v; await save(); }));
+
+    new Setting(containerEl)
+      .setName(t('sJustify'))
+      .setDesc(t('sJustifyDesc'))
+      .addToggle((tg) => tg.setValue(this.plugin.settings.justify)
+        .onChange(async (v) => { this.plugin.settings.justify = v; await save(); }));
+
+    section('sSecColour');
+
+    new Setting(containerEl)
       .setName(t('sTint'))
       .setDesc(t('sTintDesc'))
       .addDropdown((d) => d.addOptions({
@@ -1647,27 +2141,7 @@ class ReaderSettingTab extends PluginSettingTab {
       .addSlider((sl) => sl.setLimits(20, 100, 5).setValue(this.plugin.settings.brightness)
         .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.brightness = v; await save(); }));
 
-    new Setting(containerEl)
-      .setName(t('sLineHeight'))
-      .addSlider((sl) => sl.setLimits(1.2, 2.4, 0.05).setValue(this.plugin.settings.lineHeight)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.lineHeight = v; await save(); }));
-
-    new Setting(containerEl)
-      .setName(t('sGap'))
-      .addSlider((sl) => sl.setLimits(0.5, 5, 0.25).setValue(this.plugin.settings.columnGap)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.columnGap = v; await save(); }));
-
-    new Setting(containerEl)
-      .setName(t('sPadding'))
-      .setDesc(t('sPaddingDesc'))
-      .addSlider((sl) => sl.setLimits(0, 4, 0.1).setValue(this.plugin.settings.verticalPadding)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.verticalPadding = v; await save(); }));
-
-    new Setting(containerEl)
-      .setName(t('sJustify'))
-      .setDesc(t('sJustifyDesc'))
-      .addToggle((tg) => tg.setValue(this.plugin.settings.justify)
-        .onChange(async (v) => { this.plugin.settings.justify = v; await save(); }));
+    section('sSecReading');
 
     new Setting(containerEl)
       .setName(t('sAnimate'))
@@ -1721,7 +2195,15 @@ class ReaderSettingTab extends PluginSettingTab {
           .onChange(async (v) => { this.plugin.settings.fullscreen = v; await save(); }));
     }
 
-    containerEl.createEl('h4', { text: t('sImportSection') });
+    if (Platform.isMobile) {
+      new Setting(containerEl)
+        .setName(t('sHideBar'))
+        .setDesc(t('sHideBarDesc'))
+        .addToggle((tg) => tg.setValue(this.plugin.settings.hideMobileBar)
+          .onChange(async (v) => { this.plugin.settings.hideMobileBar = v; await save(); }));
+    }
+
+    section('sImportSection');
 
     new Setting(containerEl)
       .setName(t('sImportNow'))
@@ -1735,14 +2217,6 @@ class ReaderSettingTab extends PluginSettingTab {
       .addText((tx) => tx.setPlaceholder('Books')
         .setValue(this.plugin.settings.importFolder)
         .onChange(async (v) => { this.plugin.settings.importFolder = v.replace(/^\/+|\/+$/g, '').trim(); await this.plugin.saveAll(); }));
-
-    if (Platform.isMobile) {
-      new Setting(containerEl)
-        .setName(t('sHideBar'))
-        .setDesc(t('sHideBarDesc'))
-        .addToggle((tg) => tg.setValue(this.plugin.settings.hideMobileBar)
-          .onChange(async (v) => { this.plugin.settings.hideMobileBar = v; await save(); }));
-    }
   }
 }
 
@@ -1780,7 +2254,7 @@ function escapeBlockStart(s) {
 }
 // декодировать бинарный буфер в строку с учётом кодировки
 // (FB2 объявляет её в XML-декларации; для TXT — угадываем; частый случай рус. книг — windows-1251)
-function decodeBuffer(buf, forcedEnc) {
+function decodeBuffer(buf) {
   const bytes = new Uint8Array(buf);
   if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF)
     return new TextDecoder('utf-8').decode(bytes.subarray(3));
@@ -1789,12 +2263,9 @@ function decodeBuffer(buf, forcedEnc) {
   if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF)
     return new TextDecoder('utf-16be').decode(bytes.subarray(2));
 
-  let enc = forcedEnc;
-  if (!enc) {
-    const head = new TextDecoder('latin1').decode(bytes.subarray(0, 200));
-    const m = head.match(/encoding=["']([\w-]+)["']/i);
-    if (m) enc = m[1];
-  }
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, 200));
+  const m = head.match(/encoding=["']([\w-]+)["']/i);
+  const enc = m ? m[1] : '';
   if (enc) {
     const norm = enc.toLowerCase().replace(/^cp/, 'windows-').replace('win-', 'windows-');
     try { return new TextDecoder(norm).decode(bytes); } catch (e) { /* пробуем дальше */ }
@@ -1841,12 +2312,12 @@ class Fb2Converter {
     if (doc.getElementsByTagName('parsererror').length) throw new Error('FB2 XML parse error');
     const root = doc.documentElement;
 
-    // индекс бинарников (картинок)
-    Array.from(doc.getElementsByTagName('*')).forEach((el) => {
-      if (el.localName === 'binary') {
-        const id = el.getAttribute('id');
-        if (id) this.binaries[id] = { type: el.getAttribute('content-type') || 'image/jpeg', data: (el.textContent || '').replace(/\s+/g, '') };
-      }
+    // индекс бинарников (картинок). Спрашиваем по имени тега в ЛЮБОМ пространстве
+    // имён: перебирать все элементы книги ради двух десятков картинок — это
+    // лишний массив на сотни тысяч узлов
+    Array.from(doc.getElementsByTagNameNS('*', 'binary')).forEach((el) => {
+      const id = el.getAttribute('id');
+      if (id) this.binaries[id] = { type: el.getAttribute('content-type') || 'image/jpeg', data: (el.textContent || '').replace(/\s+/g, '') };
     });
 
     const bodies = this.childrenByName(root, 'body');
@@ -1885,7 +2356,7 @@ class Fb2Converter {
       if (n === 'title') { const s = this.blockText(ch).trim(); if (s) out.push('## ' + s); }
       else if (n === 'epigraph') this.quote(ch, out);
       else if (n === 'section') this.renderSection(ch, 2, out);
-      else this.block(ch, 2, out);
+      else this.block(ch, out);
     });
   }
 
@@ -1896,11 +2367,11 @@ class Fb2Converter {
       const n = ch.localName;
       if (n === 'title') return;
       if (n === 'section') this.renderSection(ch, level + 1, out);
-      else this.block(ch, level, out);
+      else this.block(ch, out);
     });
   }
 
-  block(el, level, out) {
+  block(el, out) {
     switch (el.localName) {
       case 'p': { let s = this.inline(el).trim(); if (s) out.push(escapeBlockStart(s)); break; }
       case 'subtitle': { const s = this.inline(el).trim(); if (s) out.push('**' + s + '**'); break; }
@@ -1928,7 +2399,7 @@ class Fb2Converter {
     const inner = [];
     Array.from(el.children).forEach((ch) => {
       if (ch.localName === 'text-author') { const s = this.inline(ch).trim(); if (s) inner.push('— ' + s); }
-      else this.block(ch, 99, inner);
+      else this.block(ch, inner);
     });
     const body = inner.join('\n\n');
     if (body.trim()) out.push(body.split('\n').map((l) => (l ? '> ' + l : '>')).join('\n'));
@@ -1999,7 +2470,7 @@ class Fb2Converter {
         const id = sec.getAttribute('id');
         if (!id) return;
         const parts = [];
-        Array.from(sec.children).forEach((ch) => { if (ch.localName !== 'title') this.block(ch, 99, parts); });
+        Array.from(sec.children).forEach((ch) => { if (ch.localName !== 'title') this.block(ch, parts); });
         const md = parts.join(' ').replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
         if (md) notes[id] = md;
       });
@@ -2354,7 +2825,7 @@ class EpubConverter {
   noteMarkdown(host) {
     this._inNote = true;
     const parts = [];
-    if (this.hasBlockChild(host)) Array.from(host.children).forEach((ch) => this.block(ch, 99, parts));
+    if (this.hasBlockChild(host)) Array.from(host.children).forEach((ch) => this.block(ch, parts));
     else parts.push(this.inline(host));
     this._inNote = false;
     return parts.join(' ')
@@ -2420,7 +2891,7 @@ class EpubConverter {
     const body = docBody(entry.doc);
     if (!body) return false;
     const blocks = [];
-    Array.from(body.children).forEach((ch) => this.block(ch, 2, blocks));
+    Array.from(body.children).forEach((ch) => this.block(ch, blocks));
     if (!blocks.length) return false;          // страница-обложка и прочие пустышки
     if (this.isFrontMatter(blocks)) return true;
     // раздел примечаний: всё его содержимое разошлось по тексту в скобках,
@@ -2454,7 +2925,7 @@ class EpubConverter {
     return Array.from(el.children).some((c) => HTML_BLOCKS.has(tagName(c)));
   }
 
-  block(el, level, out) {
+  block(el, out) {
     if (!el || el.nodeType !== 1 || this.noteEls.has(el)) return;
     const tag = tagName(el);
     if (tag === 'script' || tag === 'style' || tag === 'nav' || tag === 'head') return;
@@ -2472,7 +2943,7 @@ class EpubConverter {
       return;
     }
     const flow = () => {
-      if (this.hasBlockChild(el)) Array.from(el.children).forEach((ch) => this.block(ch, level, out));
+      if (this.hasBlockChild(el)) Array.from(el.children).forEach((ch) => this.block(ch, out));
       else { const s = this.inline(el).trim(); if (s) out.push(escapeBlockStart(s)); }
     };
     switch (tag) {
@@ -2515,7 +2986,7 @@ class EpubConverter {
 
   quote(el, out) {
     const inner = [];
-    Array.from(el.children).forEach((ch) => this.block(ch, 99, inner));
+    Array.from(el.children).forEach((ch) => this.block(ch, inner));
     const body = inner.length ? inner.join('\n\n') : this.inline(el).trim();
     if (body.trim()) out.push(body.split('\n').map((l) => (l ? '> ' + l : '>')).join('\n'));
   }
@@ -2645,7 +3116,10 @@ function txtToMarkdown(text, base) {
   const avgLen = nonEmpty.reduce((a, l) => a + l.length, 0) / (nonEmpty.length || 1);
   // стиль файла: абзац-на-строку (мало пустых строк, длинные строки) vs перенос по словам
   const paraPerLine = blanks < nonEmpty.length * 0.1 && avgLen > 60;
-  const chapterRe = /^\s*((глава|часть|книга|том|chapter|book|part)\b.{0,60}|[IVXLCDM]{1,7}|\d{1,3}\.?)\s*$/i;
+  // граница слова тут именно через (?!\p{L}), а НЕ через \b: \b считает словом
+  // только [A-Za-z0-9_], поэтому после «глава» никакой границы нет и русские
+  // названия глав не распознавались вовсе — книга уезжала в импорт без оглавления
+  const chapterRe = /^\s*((?:глава|часть|книга|том|chapter|book|part)(?!\p{L}).{0,60}|[IVXLCDM]{1,7}|\d{1,3}\.?)\s*$/iu;
 
   const blocks = [];
   let para = [];
@@ -2687,6 +3161,9 @@ class MdReaderPlugin extends Plugin {
     }
     this.db = loaded.positions || {};
     this.library = Array.isArray(loaded.library) ? loaded.library : []; // заметки, добавленные в библиотеку вручную
+    // измеренная скорость раскладки этой машины (мс на символ) — не настройка,
+    // а самозамер: по нему подбирается размер блока рендера
+    this.perf = (loaded.perf && typeof loaded.perf === 'object') ? { rate: loaded.perf.rate } : {};
     this.lastSaved = JSON.stringify(this.dataBlob());
 
     this.registerView(VIEW_TYPE_READER, (leaf) => new ReaderView(leaf, this));
@@ -2695,6 +3172,9 @@ class MdReaderPlugin extends Plugin {
     this.addRibbonIcon('book-open', t('ribbonLib'), () => this.openLibrary());
 
     this.addCommand({ id: 'open-library', name: t('cmdLibrary'), callback: () => this.openLibrary() });
+
+    // вернуться к последней книге одной командой, минуя список
+    this.addCommand({ id: 'continue-reading', name: t('cmdContinue'), callback: () => this.continueReading() });
 
     this.addCommand({
       id: 'open-current-in-reader',
@@ -2724,6 +3204,10 @@ class MdReaderPlugin extends Plugin {
     readerCmd('search-book', t('cmdSearch'), (v) => v.openSearch());
     readerCmd('toggle-bookmark', t('cmdBookmark'), (v) => v.toggleBookmark());
     readerCmd('open-bookmarks', t('cmdBookmarks'), (v) => v.openBookmarks());
+    readerCmd('appearance', t('cmdAppearance'), (v) => v.openAppearance());
+    readerCmd('jump-back', t('menuBack'), (v) => v.jumpBack());
+    readerCmd('font-bigger', t('cmdFontBigger'), () => this.stepFontSize(1));
+    readerCmd('font-smaller', t('cmdFontSmaller'), () => this.stepFontSize(-1));
     if (Platform.isDesktop) {
       readerCmd('toggle-fullscreen', t('cmdFullscreen'), (v) => this.toggleFullscreen(v.contentEl.ownerDocument));
     }
@@ -2790,6 +3274,7 @@ class MdReaderPlugin extends Plugin {
           v.filePath = null;
           v.chapters = null;
           v.toc = [];
+          if (v.clearCache) v.clearCache();
           if (v.content) { v.content.empty(); v.content.createDiv('hr-empty').setText(t('notFound')); }
         }
       });
@@ -2818,7 +3303,7 @@ class MdReaderPlugin extends Plugin {
   }
 
   dataBlob() {
-    return Object.assign({}, this.settings, { positions: this.db, library: this.library });
+    return Object.assign({}, this.settings, { positions: this.db, library: this.library, perf: this.perf });
   }
 
   async saveAll() {
@@ -2828,6 +3313,22 @@ class MdReaderPlugin extends Plugin {
   }
 
   async openReader(file) {
+    // книга уже открыта в ридере — показать ту вкладку, а не плодить копии.
+    // Путь берём из состояния ЛИСТА, а не из view: у отложенной (ещё не открытой
+    // после перезапуска) вкладки вместо вьюхи лежит заглушка без наших полей
+    const open = this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).find((l) => {
+      const st = l.getViewState();
+      return !!(st && st.state && st.state.filePath === file.path);
+    });
+    if (open) {
+      await this.app.workspace.revealLeaf(open);
+      if (open.loadIfDeferred) await open.loadIfDeferred();
+      this.applyImmersive(open);
+      if (this.settings.fullscreen && Platform.isDesktop) this.setFullscreen(this.docForLeaf(open), true);
+      this.db[file.path] = Object.assign({}, this.db[file.path], { t: Date.now() });
+      return;
+    }
+
     const mode = this.settings.openIn;
     let leaf;
     if (mode === 'current') leaf = this.app.workspace.getLeaf(false);
@@ -2879,6 +3380,19 @@ class MdReaderPlugin extends Plugin {
       const f = this.app.vault.getAbstractFileByPath(p);
       if (f instanceof TFile) { out.push({ file: f, registered: true }); seen.add(p); }
     });
+    // «недавнее»: заметки, которые читали ридером, но которых нет ни в папке книг,
+    // ни в добавленных вручную. Берём только записи со временем — у легаси-позиций
+    // (v1.1) его нет, и «недавним» такое называть нечестно
+    const recents = [];
+    Object.keys(this.db).forEach((p) => {
+      if (seen.has(p)) return;
+      const rec = this.db[p];
+      if (!rec || !rec.t) return;
+      const f = this.app.vault.getAbstractFileByPath(p);
+      if (f instanceof TFile) recents.push({ file: f, recent: true, t: rec.t });
+    });
+    recents.sort((a, b) => b.t - a.t);
+    recents.slice(0, 15).forEach((r) => { out.push(r); seen.add(r.file.path); });
     // последняя читанная — сверху; не открывавшиеся ридером — по времени изменения файла
     const lastRead = (f) => {
       const pos = this.db[f.path];
@@ -2886,6 +3400,74 @@ class MdReaderPlugin extends Plugin {
     };
     out.sort((a, b) => lastRead(b.file) - lastRead(a.file));
     return out;
+  }
+
+  // последняя книга, которую действительно читали (по времени из позиций)
+  lastReadFile() {
+    let best = null, bestT = 0;
+    for (const path of Object.keys(this.db)) {
+      const rec = this.db[path];
+      if (!rec || !rec.t || rec.t <= bestT) continue;
+      const f = this.app.vault.getAbstractFileByPath(path);
+      if (f instanceof TFile) { best = f; bestT = rec.t; }
+    }
+    return best;
+  }
+
+  continueReading() {
+    const f = this.lastReadFile();
+    if (!f) { new Notice(t('noContinue')); return; }
+    this.openReader(f);
+  }
+
+  async forgetPosition(path) {
+    delete this.db[path];
+    await this.saveAll();
+  }
+
+  /* ---------- подгонка размера блока под машину ---------- */
+  // Раскладка колонок линейна по объёму текста (замерено: ~0.28 мс на 1000
+  // символов на быстром ПК). Значит, зная реальную скорость ЭТОЙ машины, можно
+  // подобрать блок так, чтобы раскладка укладывалась в один кадр: на слабом
+  // железе блоки станут меньше сами, без единой настройки.
+  noteLayoutRate(ms, chars) {
+    if (!(chars > 5000) || !(ms > 0.5)) return; // мелочь и шум не считаем
+    const cur = ms / chars;
+    const prev = this.perf.rate;
+    const next = prev ? prev * 0.7 + cur * 0.3 : cur;
+    // на диск пишем, только когда оценка заметно уехала: иначе автосохранение
+    // дёргало бы data.json на каждом замере
+    if (!prev || Math.abs(next - prev) / prev > 0.15) {
+      this.perf.rate = Math.round(next * 1e9) / 1e9;
+    }
+  }
+
+  blockTargets() {
+    const mobile = Platform.isMobile;
+    const rate = this.perf && this.perf.rate;
+    let pack = CHAPTER_PACK_TARGET; // запасное значение платформы
+    if (rate > 0) {
+      const BUDGET = mobile ? 12 : 16; // мс раскладки на блок — примерно один кадр
+      const lo = mobile ? 12000 : 20000;
+      const hi = mobile ? 60000 : 120000;
+      pack = Math.max(lo, Math.min(hi, Math.round(BUDGET / rate / 5000) * 5000));
+    }
+    // порог «не резать вовсе» — вдвое больше блока: мелкие заметки как были целиком
+    return { split: pack * 2, pack, chunk: Math.round(pack * 0.75) };
+  }
+
+  // размер шрифта на лету: хоткеи, кнопки панели «Аа», щипок
+  stepFontSize(dir) {
+    const v = Math.round((this.settings.fontSize + dir * 0.05) * 100) / 100;
+    const next = Math.max(0.6, Math.min(2, v));
+    if (next === this.settings.fontSize) return;
+    this.settings.fontSize = next;
+    this.commitFontSize();
+  }
+
+  commitFontSize() {
+    this.saveAll();
+    this.refreshOpenViews();
   }
 
   async addToLibrary(path) {
@@ -2907,6 +3489,9 @@ class MdReaderPlugin extends Plugin {
     input.type = 'file';
     input.accept = IMPORT_ACCEPT;
     input.style.display = 'none';
+    // отменённый диалог не шлёт change — без этого каждый отказ оставлял бы
+    // висеть в body ещё один невидимый input
+    input.addEventListener('cancel', () => input.remove(), { once: true });
     input.addEventListener('change', async () => {
       const f = input.files && input.files[0];
       input.remove();
@@ -3067,7 +3652,12 @@ class MdReaderPlugin extends Plugin {
   }
 
   applyImmersive(leaf) {
-    leaf = leaf || this.app.workspace.activeLeaf;
+    // без аргумента (обновление настроек) спрашиваем активный ридер, а не
+    // устаревшее workspace.activeLeaf: активна не наша вьюха — иммерсив и не нужен
+    if (!leaf) {
+      const active = this.app.workspace.getActiveViewOfType(ReaderView);
+      leaf = active ? active.leaf : null;
+    }
     const isReader = !!(leaf && leaf.view && typeof leaf.view.getViewType === 'function'
       && leaf.view.getViewType() === VIEW_TYPE_READER);
     const on = isReader && this.settings.immersive;
