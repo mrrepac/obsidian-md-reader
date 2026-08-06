@@ -136,6 +136,18 @@ const STRINGS = {
     menuNav: 'Navigation',
     menuToc: 'Table of contents',
     menuSearch: 'Search in this book',
+    menuLibrary: 'Library',
+    menuEdit: 'Open the note for editing',
+    menuExit: 'Leave the reader',
+    cmdExit: 'Leave the reader',
+    endExit: 'Leave',
+    cmdNextChapter: 'Next chapter',
+    cmdPrevChapter: 'Previous chapter',
+    cmdEdit: 'Open the note for editing',
+    scrubLabel: 'Go to a place in the book',
+    unitMin: 'min',
+    unitH: 'h',
+    noChapters: 'This book has no chapters',
     menuBmAdd: 'Add a bookmark here',
     menuBmRemove: 'Remove the bookmark here',
     menuBmList: 'Bookmarks',
@@ -159,7 +171,7 @@ const STRINGS = {
     libForget: 'Remove from recent',
     endTitle: 'The end',
     endLibrary: 'To the library',
-    endClose: 'Close',
+    endClose: 'Stay',
     cmdFontBigger: 'Increase font size',
     cmdFontSmaller: 'Decrease font size',
     cmdImport: 'Import book to Markdown (fb2, epub, txt)…',
@@ -258,6 +270,18 @@ const STRINGS = {
     menuNav: 'Навигация',
     menuToc: 'Оглавление',
     menuSearch: 'Поиск по книге',
+    menuLibrary: 'Библиотека',
+    menuEdit: 'Открыть заметку для правки',
+    menuExit: 'Выйти из чтения',
+    cmdExit: 'Выйти из чтения',
+    endExit: 'Выйти',
+    cmdNextChapter: 'Следующая глава',
+    cmdPrevChapter: 'Предыдущая глава',
+    cmdEdit: 'Открыть заметку для правки',
+    scrubLabel: 'Перейти в другое место книги',
+    unitMin: 'мин',
+    unitH: 'ч',
+    noChapters: 'В этой книге нет глав',
     menuBmAdd: 'Поставить закладку',
     menuBmRemove: 'Снять закладку',
     menuBmList: 'Закладки',
@@ -281,7 +305,7 @@ const STRINGS = {
     libForget: 'Убрать из недавнего',
     endTitle: 'Конец',
     endLibrary: 'В библиотеку',
-    endClose: 'Закрыть',
+    endClose: 'Остаться',
     cmdFontBigger: 'Увеличить шрифт',
     cmdFontSmaller: 'Уменьшить шрифт',
     cmdImport: 'Импортировать книгу в Markdown (fb2, epub, txt)…',
@@ -534,6 +558,9 @@ class AppearanceModal extends Modal {
     this.titleEl.setText(t('menuAppearance'));
     const p = this.plugin;
     const save = () => { p.saveAll(); p.refreshOpenViews(); };
+    // ползунок шлёт onChange на каждый шаг — писать файл на каждый нельзя,
+    // отдаём это общему автосохранению (см. queueSave)
+    const live = () => p.queueSave();
 
     // размер шрифта — двумя большими кнопками: это то, ради чего сюда заходят,
     // а ползунок в модалке пальцем не поймать
@@ -567,7 +594,7 @@ class AppearanceModal extends Modal {
       .setName(t(key))
       .addSlider((sl) => sl.setLimits(min, max, step).setValue(p.settings[prop])
         .setDynamicTooltip()
-        .onChange((v) => { p.settings[prop] = v; save(); }));
+        .onChange((v) => { p.settings[prop] = v; live(); }));
 
     slider('sLineHeight', 'lineHeight', 1.2, 2.4, 0.05);
     slider('sPadding', 'verticalPadding', 0, 4, 0.1);
@@ -667,9 +694,10 @@ function scanHeadings(lines) {
   return out;
 }
 
-// оглавление из цельного тела (когда файл не делится на главы) — все заголовки в главе `chapter`
+// оглавление из цельного тела (когда файл не делится на главы) — все заголовки в главе `chapter`.
+// line — номер строки заголовка в ТЕЛЕ заметки: по нему ридер открывает исходник на этом месте
 function tocFromBody(body, chapter) {
-  return scanHeadings(body.split('\n')).map((h, i) => ({ text: h.text, level: h.level, chapter, hIndex: i }));
+  return scanHeadings(body.split('\n')).map((h, i) => ({ text: h.text, level: h.level, chapter, hIndex: i, line: h.line }));
 }
 
 // разрезать большой текст без заголовков на куски ~target символов по границам абзацев
@@ -735,7 +763,7 @@ function splitChapters(body, targets) {
         buf = piece;
         if (pi === 0 && sec.heading >= 0) {
           const h = headings[sec.heading];
-          toc.push({ text: h.text, level: h.level, chapter: curChapter, hIndex: 0 });
+          toc.push({ text: h.text, level: h.level, chapter: curChapter, hIndex: 0, line: h.line });
         }
         flush();
       });
@@ -745,7 +773,7 @@ function splitChapters(body, targets) {
     if (buf !== '' && buf.length + sec.text.length > PACK) flush();
     if (sec.heading >= 0) {
       const h = headings[sec.heading];
-      toc.push({ text: h.text, level: h.level, chapter: curChapter, hIndex: curHCount });
+      toc.push({ text: h.text, level: h.level, chapter: curChapter, hIndex: curHCount, line: h.line });
       curHCount++;
     }
     buf += (buf ? '\n' : '') + sec.text;
@@ -753,6 +781,22 @@ function splitChapters(body, targets) {
   flush();
 
   return { chapters, toc, chars: chapters.map((c) => c.length) };
+}
+
+// Язык текста — для переносов при выравнивании по ширине. Раньше брали язык
+// интерфейса, и английская книга у русского Obsidian переносилась по русским
+// правилам (а русская у английского — не переносилась вовсе). Хватает грубой
+// прикидки по первым тысячам букв: нас интересует только кириллица vs латиница
+function guessLang(text) {
+  const head = String(text || '').slice(0, 4000);
+  let cyr = 0, lat = 0;
+  for (let i = 0; i < head.length; i++) {
+    const c = head.charCodeAt(i);
+    if (c >= 0x0400 && c <= 0x04FF) cyr++;
+    else if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) lat++;
+  }
+  if (cyr + lat < 20) return '';        // цифры, код, картинки — не гадаем
+  return cyr > lat ? 'ru' : 'en';
 }
 
 // расстояние между двумя пальцами — основа щипка
@@ -792,10 +836,12 @@ class ReaderView extends ItemView {
     this._searchIndex = null;      // {path, low[]} — главы в нижнем регистре для поиска
     this.chapters = null;     // markdown по главам (для мелких заметок — одна глава = весь текст)
     this.chapterIndex = 0;
-    this.toc = [];            // все заголовки: {text, level, chapter, hIndex}
+    this.toc = [];            // все заголовки: {text, level, chapter, hIndex, line}
     this.chapterChars = [];
     this.charsBefore = [];
     this.totalChars = 0;
+    this.bodyLine0 = 0;       // на какой строке файла начинается тело (после frontmatter)
+    this.textLang = '';       // язык текста книги — от него зависят переносы
 
     // фоновая предзагрузка следующего блока (переход вперёд без ожидания рендера)
     this._prefetch = null;      // {index, el, comp, file}
@@ -811,6 +857,11 @@ class ReaderView extends ItemView {
     this._headPages = null;   // [{page, toc}] — заголовки текущего блока, для строки состояния
     this._endEl = null;       // отбивка «Конец» на последней странице
     this._statusEls = null;   // готовые узлы строки состояния (создаются в onOpen)
+    this._speedAt = 0;        // время и место прошлого листания — из них считается скорость чтения
+    this._speedG = 0;
+    this._scrub = null;       // {id, g} — идёт протяжка по полосе прогресса
+    this._reloadTimer = null; // отложенная перечитка после правки файла снаружи
+    this._keepG = null;       // место, куда вернуться после перечитки (вместо сохранённого)
   }
 
   getViewType() { return VIEW_TYPE_READER; }
@@ -860,8 +911,15 @@ class ReaderView extends ItemView {
     const bar = vp.createDiv('hr-statusbar hr-ui');
     this.statusBar = bar; // высота строки статуса подпирает нижний отступ страницы
     bar.setAttribute('aria-live', 'polite');
-    this.progress = bar.createDiv('hr-progress');
+    // полоса прогресса — ещё и перемотка по всей книге. Сама полоса тонкая, поэтому
+    // ловим указатель обёрткой с отступами: пальцем в 3 пиксела не попасть
+    this.scrubEl = bar.createDiv('hr-scrub');
+    // без role="slider": по-настоящему это потребовало бы фокуса и своих стрелок,
+    // а те же переходы уже есть с клавиатуры и в меню. Ограничиваемся подписью
+    this.scrubEl.setAttribute('aria-label', t('scrubLabel'));
+    this.progress = this.scrubEl.createDiv('hr-progress');
     this.progressFill = this.progress.createDiv('hr-progress-fill');
+    this.setupScrub();
     // текст статуса («34%») кликабелен — открывает меню навигации. Это главная точка
     // входа на телефоне: в иммерсивном режиме нижняя панель Obsidian спрятана,
     // и до палитры команд оттуда не добраться
@@ -872,6 +930,7 @@ class ReaderView extends ItemView {
       bm: this.statusText.createSpan({ cls: 'hr-status-bm' }),
       chapter: this.statusText.createSpan({ cls: 'hr-status-chapter' }),
       pos: this.statusText.createSpan({ cls: 'hr-status-pos', text: '1 / 1' }),
+      left: this.statusText.createSpan({ cls: 'hr-status-left' }),
     };
     this.statusText.setAttribute('aria-label', t('menuNav'));
     this.registerDomEvent(this.statusText, 'click', (e) => { e.stopPropagation(); this.openNavMenu(e); });
@@ -894,6 +953,7 @@ class ReaderView extends ItemView {
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     if (this._repaginateTimer) { clearTimeout(this._repaginateTimer); this._repaginateTimer = null; }
+    if (this._reloadTimer) { clearTimeout(this._reloadTimer); this._reloadTimer = null; }
     this.discardPrefetch();
     this.clearCache();
     this.savePos();
@@ -911,6 +971,9 @@ class ReaderView extends ItemView {
   /* ---------- render ---------- */
   async renderFile() {
     if (!this.content) return;
+    // отложенная перечитка (файл правили снаружи) относилась к прежнему состоянию —
+    // мы и так сейчас перечитываем всё заново
+    if (this._reloadTimer) { clearTimeout(this._reloadTimer); this._reloadTimer = null; }
     this.discardPrefetch(); // предзагруженный блок относится к прежнему файлу
     this.clearCache();      // и отложенные соседние блоки — тоже
     this._searchIndex = null;
@@ -933,6 +996,12 @@ class ReaderView extends ItemView {
       ? raw.slice(fmPos.end.offset)
       : raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
     body = body.replace(/^\s+/, '');
+    // сколько строк файла осталось выше тела: номера строк в оглавлении считаются от
+    // начала тела, а редактор открывается по строке ФАЙЛА
+    this.bodyLine0 = raw.length > body.length
+      ? (raw.slice(0, raw.length - body.length).match(/\n/g) || []).length
+      : 0;
+    this.textLang = guessLang(body);
 
     // разбить на главы (мелкие файлы → одна глава = весь текст) и посчитать метрики прогресса
     const split = splitChapters(body, this.plugin.blockTargets());
@@ -947,8 +1016,11 @@ class ReaderView extends ItemView {
     // стартовая позиция: g — глобальная доля по всей книге, НЕ зависит от разбиения
     // на блоки (у ПК и телефона оно разное). Легаси-форматы: {chapter, fraction}
     // (v1.4, поблочная) и просто {fraction} (v1.1 — тоже глобальная по смыслу)
-    const saved = this.plugin.settings.rememberPosition && this.plugin.db[this.file.path];
-    let g = 0;
+    const keep = this._keepG;
+    this._keepG = null;
+    this.resetSpeedSample();
+    const saved = keep == null && this.plugin.settings.rememberPosition && this.plugin.db[this.file.path];
+    let g = keep == null ? 0 : keep;
     if (saved) {
       if (typeof saved.g === 'number') g = saved.g;
       else if (typeof saved.chapter === 'number' && this.totalChars > 0) {
@@ -994,6 +1066,10 @@ class ReaderView extends ItemView {
     this.chapterIndex = Math.max(0, Math.min(index, this.chapters.length - 1));
     this.hideEnd();
     this._headPages = null;
+
+    // подсветку находки уносить с собой нельзя: блок ляжет в кэш вместе с ней, и при
+    // возврате прошлый запрос будет светиться посреди текста как ни в чём не бывало
+    this.clearHighlight();
 
     // уходим из целиком отрисованного блока — откладываем его, а не выбрасываем.
     // Недорисованный (прервали на середине) в кэш класть нельзя
@@ -1271,7 +1347,48 @@ class ReaderView extends ItemView {
     // на каждом перелистывании (внутри дешёвые отсечки)
     this.schedulePrefetch();
   }
+
+  // на весь текст сразу: Home/End в книге должны означать книгу, а не блок рендера
+  // (в разрезанной книге End уводил в конец текущего блока — то есть в никуда)
+  goToBookEdge(g) {
+    if (!this.chapters) return;
+    this.pushJump();
+    this.goToG(g);
+  }
+
+  /* ---------- скорость чтения ---------- */
+  // Замеряем по перелистываниям вперёд: сколько символов прочитано за сколько времени.
+  // Отсюда берётся «сколько осталось» в строке состояния — своя скорость, а не средняя
+  // по больнице. Прыжки (оглавление, поиск, перемотка) сбрасывают отсчёт
+  noteReadStep() {
+    const now = Date.now();
+    const g = this.currentG();
+    const prevT = this._speedAt, prevG = this._speedG;
+    this._speedAt = now;
+    this._speedG = g;
+    if (!prevT || !this.totalChars) return;
+    const dt = now - prevT;
+    const chars = (g - prevG) * this.totalChars;
+    // назад, прыжок, пролистывание глазами и «отошёл от телефона» — не чтение
+    if (dt < 1200 || dt > 300000 || chars < 200 || chars > 20000) return;
+    this.plugin.noteReadSpeed(chars, dt);
+  }
+
+  resetSpeedSample() { this._speedAt = 0; this._speedG = 0; }
+
+  // «≈14 мин» до конца книги. Пока меньше минуты — не показываем: это шум
+  timeLeftLabel() {
+    if (!this.totalChars || !this._measured) return '';
+    const rest = (1 - this.currentG()) * this.totalChars;
+    const min = Math.round(rest / this.plugin.readingSpeed());
+    if (min < 1) return '';
+    if (min < 60) return '≈' + min + ' ' + t('unitMin');
+    const h = Math.floor(min / 60), m = min % 60;
+    return '≈' + h + ' ' + t('unitH') + (m && h < 10 ? ' ' + m + ' ' + t('unitMin') : '');
+  }
+
   next() {
+    this.noteReadStep();
     if (this.page < this.totalPages - 1) { this.goTo(this.page + 1); return; }
     // конец главы — перейти в начало следующей
     if (this.chapters && this.chapterIndex < this.chapters.length - 1) {
@@ -1300,6 +1417,10 @@ class ReaderView extends ItemView {
     const row = box.createDiv('hr-end-actions');
     const lib = row.createEl('button', { cls: 'mod-cta', text: t('endLibrary') });
     lib.addEventListener('click', () => { this.hideEnd(); this.plugin.openLibrary(); });
+    // дочитал — обычно на этом чтение и заканчивается: закрыть ридер и вернуть
+    // рабочее место в то положение, в каком оно было до книги
+    row.createEl('button', { text: t('endExit') })
+      .addEventListener('click', () => { this.hideEnd(); this.plugin.exitReader(this.leaf); });
     row.createEl('button', { text: t('endClose') })
       .addEventListener('click', () => this.hideEnd());
     // мимо кнопок — тоже закрыть: отбивка не должна мешать перечитывать последнюю страницу
@@ -1313,6 +1434,7 @@ class ReaderView extends ItemView {
   /* ---------- возврат после прыжка ---------- */
   // откуда прыгнули по оглавлению / поиску / закладке — чтобы вернуться к чтению
   pushJump() {
+    this.resetSpeedSample(); // прыжок — не чтение: следующий шаг мерить не от него
     if (!this._measured || !this.chapters) return;
     this._jumps.push(this.currentG());
     if (this._jumps.length > 20) this._jumps.shift();
@@ -1333,6 +1455,7 @@ class ReaderView extends ItemView {
     const size = Math.max(0.6, Math.min(2, Math.round(v * 20) / 20));
     if (size === this.plugin.settings.fontSize) return;
     this.plugin.settings.fontSize = size;
+    this.plugin._dirty = true;
     if (this.content) this.content.style.setProperty('--hr-font-size', size + 'em');
     if (this._debouncedRemeasure) this._debouncedRemeasure();
   }
@@ -1391,11 +1514,10 @@ class ReaderView extends ItemView {
     this._headPages = out.length ? out : null;
   }
 
-  // подпись места для строки состояния: последний заголовок, начавшийся не позже
-  // текущей страницы. Короткий номер («IX») сам по себе ни о чём не говорит —
-  // дополняем его ближайшим заголовком старшего уровня («Часть вторая · IX»)
-  currentChapterLabel() {
-    if (!this.toc || !this.toc.length) return '';
+  // номер пункта оглавления, в котором мы сейчас: последний заголовок, начавшийся
+  // не позже текущей страницы (-1, если до первого заголовка книги)
+  currentTocIndex() {
+    if (!this.toc || !this.toc.length) return -1;
     let idx = -1;
     if (this._headPages) {
       for (const h of this._headPages) { if (h.page > this.page) break; idx = h.toc; }
@@ -1406,6 +1528,13 @@ class ReaderView extends ItemView {
         if (this.toc[i].chapter < this.chapterIndex) { idx = i; break; }
       }
     }
+    return idx;
+  }
+
+  // подпись места для строки состояния. Короткий номер («IX») сам по себе ни о чём
+  // не говорит — дополняем его ближайшим заголовком старшего уровня («Часть вторая · IX»)
+  currentChapterLabel() {
+    const idx = this.currentTocIndex();
     if (idx < 0) return '';
     const cur = this.toc[idx];
     let label = String(cur.text || '').trim();
@@ -1441,16 +1570,67 @@ class ReaderView extends ItemView {
     return els[index] || null;
   }
 
+  /* ---------- переход по главам ---------- */
+  // Шаг по ОГЛАВЛЕНИЮ, а не по блокам рендера: блок — это внутренняя единица разбиения
+  // (их в томе может быть два десятка), а человек мыслит главами.
+  // В стек «назад» не пишем: это обычное линейное чтение, а не прыжок
+  stepChapter(dir) {
+    if (!this.toc || !this.toc.length) { new Notice(t('noChapters')); return; }
+    const cur = this.currentTocIndex();
+    // вперёд — следующий пункт; назад — предыдущий, но если мы стоим не на самом
+    // начале главы, первым шагом возвращаемся к её началу (как во всех читалках)
+    let next;
+    if (dir > 0) next = cur + 1;
+    else next = this.atChapterStart(cur) ? cur - 1 : cur;
+    if (next < 0 || next >= this.toc.length) return;
+    const entry = this.toc[next];
+    if (entry.chapter === this.chapterIndex) {
+      const el = this.resolveHeadingEl(entry.hIndex, entry.text);
+      if (el) this.goToHeading(el);
+    } else {
+      this.savePos();
+      this.renderChapter(entry.chapter, { heading: { index: entry.hIndex, text: entry.text } });
+    }
+  }
+
+  // стоим ли ровно на странице, с которой начинается глава idx
+  atChapterStart(idx) {
+    if (idx < 0 || !this._headPages) return false;
+    return this._headPages.some((h) => h.toc === idx && h.page === this.page);
+  }
+
+  /* ---------- заметка в редакторе ---------- */
+  // Читаешь свою заметку, видишь опечатку — и до сих пор её нечем было поправить:
+  // приходилось искать файл руками. Открываем исходник на строке текущей главы
+  openInEditor() {
+    if (!this.file) return;
+    const idx = this.currentTocIndex();
+    const line = idx >= 0 && typeof this.toc[idx].line === 'number'
+      ? this.bodyLine0 + this.toc[idx].line
+      : 0;
+    this.savePos();
+    const leaf = this.app.workspace.getLeaf('tab');
+    leaf.openFile(this.file, { eState: { line } });
+  }
+
   /* ---------- navigation menu (главная точка входа: тап по проценту) ---------- */
   openNavMenu(evt) {
     const menu = new Menu();
     menu.addItem((i) => i.setTitle(t('menuToc')).setIcon('list').onClick(() => this.openToc()));
     menu.addItem((i) => i.setTitle(t('menuSearch')).setIcon('search').onClick(() => this.openSearch()));
+    if (this.toc && this.toc.length) {
+      menu.addItem((i) => i.setTitle(t('cmdPrevChapter')).setIcon('chevron-left').onClick(() => this.stepChapter(-1)));
+      menu.addItem((i) => i.setTitle(t('cmdNextChapter')).setIcon('chevron-right').onClick(() => this.stepChapter(1)));
+    }
     if (this.canJumpBack()) {
       menu.addItem((i) => i.setTitle(t('menuBack')).setIcon('arrow-left').onClick(() => this.jumpBack()));
     }
     menu.addSeparator();
     menu.addItem((i) => i.setTitle(t('menuAppearance')).setIcon('type').onClick(() => this.openAppearance()));
+    // в иммерсивном режиме это единственная дорога наружу: шапка вкладки спрятана,
+    // а на телефоне спрятана и нижняя панель Obsidian
+    menu.addItem((i) => i.setTitle(t('menuLibrary')).setIcon('book-open').onClick(() => this.plugin.openLibrary()));
+    menu.addItem((i) => i.setTitle(t('menuEdit')).setIcon('pencil').onClick(() => this.openInEditor()));
     menu.addSeparator();
     const here = this.bookmarkOnPage();
     menu.addItem((i) => i
@@ -1467,6 +1647,9 @@ class ReaderView extends ItemView {
         .setIcon(fs ? 'minimize' : 'maximize')
         .onClick(() => this.plugin.toggleFullscreen(doc)));
     }
+    menu.addSeparator();
+    menu.addItem((i) => i.setTitle(t('menuExit')).setIcon('log-out')
+      .onClick(() => this.plugin.exitReader(this.leaf)));
     menu.showAtMouseEvent(evt);
   }
 
@@ -1613,6 +1796,7 @@ class ReaderView extends ItemView {
     const rec = Object.assign({}, this.plugin.db[this.file.path]);
     if (list && list.length) rec.b = list; else delete rec.b;
     this.plugin.db[this.file.path] = rec;
+    this.plugin._dirty = true;
   }
 
   // страница текущего блока, на которую попадает доля g (null — доля в другом блоке)
@@ -1704,6 +1888,7 @@ class ReaderView extends ItemView {
   }
 
   updateStatus() {
+    if (this._scrub) return; // идёт перемотка: в строке состояния сейчас предпросмотр
     // доля внутри главы (0% на первой странице главы, 100% на последней)
     const withinFrac = this.totalPages > 1 ? this.page / (this.totalPages - 1) : 1;
     const multi = this.chapters && this.chapters.length > 1;
@@ -1724,9 +1909,11 @@ class ReaderView extends ItemView {
       const base = multi ? pct + '%' : ((this.page + 1) + ' / ' + this.totalPages + ' · ' + pct + '%');
       const bm = this.bookmarkOnPage() ? '🔖' : '';
       const label = this.currentChapterLabel();
+      const left = this.timeLeftLabel();
       if (e.bm.textContent !== bm) e.bm.textContent = bm;
       if (e.chapter.textContent !== label) e.chapter.textContent = label;
       if (e.pos.textContent !== base) e.pos.textContent = base;
+      if (e.left.textContent !== left) e.left.textContent = left;
     }
     // scaleX, а не width: ширина — свойство раскладки, и её переход заставлял
     // браузер пересчитывать полосу все 200 мс каждого листания
@@ -1750,6 +1937,7 @@ class ReaderView extends ItemView {
     const rec = { g: this.currentG(), t: Date.now() };
     if (prev && Array.isArray(prev.b) && prev.b.length) rec.b = prev.b;
     this.plugin.db[this.file.path] = rec;
+    this.plugin._dirty = true;
   }
 
   applySettings() {
@@ -1798,9 +1986,97 @@ class ReaderView extends ItemView {
       if (minEm > bottomEm) bottomEm = minEm;
     }
     c.style.paddingBottom = bottomEm + 'em';
-    // выравнивание по ширине + переносы (язык — из языка интерфейса, помогает рус. переносам)
+    // выравнивание по ширине + переносы. Язык берём у САМОГО текста, а не у интерфейса:
+    // от него зависят правила переноса, и книга не обязана быть на языке Obsidian
     c.classList.toggle('hr-justify', !!s.justify);
-    c.setAttribute('lang', APP_LANG);
+    c.setAttribute('lang', this.textLang || APP_LANG);
+  }
+
+  /* ---------- перемотка по полосе прогресса ---------- */
+  // Полоса была чисто декоративной, и «пролистнуть примерно на середину» было нечем:
+  // только оглавление, поиск и закладки. Теперь по ней тянут, как в любой читалке,
+  // а над пальцем видно, куда попадёшь — процент и название главы
+  setupScrub() {
+    const el = this.scrubEl;
+    if (!el) return;
+    const fracAt = (clientX) => {
+      const r = this.progress.getBoundingClientRect();
+      if (!r.width) return 0;
+      return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    };
+    const preview = (g) => {
+      if (this.progressFill) this.progressFill.style.transform = 'scaleX(' + g + ')';
+      const e = this._statusEls;
+      if (!e) return;
+      e.bm.textContent = '';
+      e.chapter.textContent = this.chapterAtG(g);
+      e.pos.textContent = Math.round(g * 100) + '%';
+      e.left.textContent = '';
+    };
+    this.registerDomEvent(el, 'pointerdown', (e) => {
+      if (!this.chapters || e.button > 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._scrub = { id: e.pointerId, g: fracAt(e.clientX) };
+      // класс, а не :active — preventDefault выше гасит и его тоже
+      el.addClass('is-scrubbing');
+      try { if (el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch (err) { /* без захвата тоже работает */ }
+      this.hideEnd();
+      preview(this._scrub.g);
+    });
+    this.registerDomEvent(el, 'pointermove', (e) => {
+      if (!this._scrub || e.pointerId !== this._scrub.id) return;
+      e.preventDefault();
+      this._scrub.g = fracAt(e.clientX);
+      preview(this._scrub.g);
+    });
+    this.registerDomEvent(el, 'pointerup', (e) => {
+      if (!this._scrub || e.pointerId !== this._scrub.id) return;
+      const g = this._scrub.g;
+      this._scrub = null;
+      el.removeClass('is-scrubbing');
+      // за отпусканием пальца прилетит синтетический click по вьюпорту — он не должен
+      // сойти за тап по зоне листания
+      this._lastTouch = Date.now();
+      // прыжок кладём в стек «назад»: промахнуться по трёхпиксельной полосе легко,
+      // и вернуться к чтению должно быть одним движением
+      this.pushJump();
+      this.goToG(g);
+      this.updateStatus();
+    });
+    this.registerDomEvent(el, 'pointercancel', (e) => {
+      if (!this._scrub || e.pointerId !== this._scrub.id) return;
+      this._scrub = null;
+      el.removeClass('is-scrubbing');
+      this.updateStatus();
+    });
+  }
+
+  // название главы, в которую попадает доля g — подпись для перемотки.
+  // Точность блока рендера: внутри блока может лежать несколько глав, берём первую
+  chapterAtG(g) {
+    if (!this.toc || !this.toc.length) return '';
+    const ch = this.blockForG(g).chapter;
+    let idx = -1;
+    for (let i = 0; i < this.toc.length; i++) { if (this.toc[i].chapter > ch) break; idx = i; }
+    if (idx < 0) return '';
+    const s = String(this.toc[idx].text || '').trim();
+    return s.length > 40 ? s.slice(0, 39).trim() + '…' : s;
+  }
+
+  /* ---------- заметку поправили снаружи ---------- */
+  // Читаешь свою заметку, правишь её в соседней вкладке — ридер должен догнать.
+  // Ждём паузы в наборе: перерисовывать книгу на каждое нажатие клавиши немыслимо
+  scheduleReload() {
+    if (this._reloadTimer) clearTimeout(this._reloadTimer);
+    this._reloadTimer = setTimeout(() => {
+      this._reloadTimer = null;
+      if (!this.file || !this.content || !this.content.isConnected) return;
+      // держимся за место долей книги, а не страницей: текст изменился, страницы поедут.
+      // Через _keepG, а не через сохранённую позицию: «запоминать позицию» может быть выключено
+      this._keepG = this._measured ? this.currentG() : null;
+      this.renderFile();
+    }, 900);
   }
 
   setupRepagination() {
@@ -1836,10 +2112,28 @@ class ReaderView extends ItemView {
   toggleControls() {
     if (this.plugin.settings.immersive) {
       const doc = (this.contentEl && this.contentEl.ownerDocument) || document;
-      doc.body.classList.toggle('hr-chrome-hidden');
+      const hidden = doc.body.classList.toggle('hr-chrome-hidden');
+      // выбор запоминаем: иначе уход на соседнюю вкладку и обратно снова прятал бы хром
+      this.plugin._chromeShown = !hidden;
     } else if (this.viewport) {
       this.viewport.classList.toggle('hr-hide-ui');
     }
+  }
+
+  // спрятано ли сейчас хоть что-то из интерфейса (иммерсив, полный экран, наши контролы)
+  chromeHidden() {
+    const doc = (this.contentEl && this.contentEl.ownerDocument) || document;
+    if (doc.body && doc.body.classList.contains('hr-chrome-hidden')) return true;
+    if (this.viewport && this.viewport.classList.contains('hr-hide-ui')) return true;
+    return this.plugin ? this.plugin.isFullscreen(doc) : false;
+  }
+
+  // Escape в два шага: первый возвращает интерфейс (и книга остаётся открытой),
+  // второй выходит из чтения совсем. Так «случайный Esc» ничего не теряет,
+  // а выйти всё равно можно не глядя
+  onEscape() {
+    if (this.chromeHidden()) { this.exitReadingChrome(); return; }
+    if (this.plugin) this.plugin.exitReader(this.leaf);
   }
 
   exitReadingChrome() {
@@ -1848,9 +2142,12 @@ class ReaderView extends ItemView {
     const doc = (this.contentEl && this.contentEl.ownerDocument) || document;
     if (this.plugin) this.plugin.setFullscreen(doc, false);
     doc.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
-    if (this.plugin && this.plugin._immersiveDoc === doc) this.plugin._immersiveDoc = null;
+    if (this.plugin) {
+      this.plugin._chromeShown = true; // показали руками — сам больше не прячется
+      if (this.plugin._immersiveDoc === doc) this.plugin._immersiveDoc = null;
+      if (this.plugin.restoreSidebars) this.plugin.restoreSidebars();
+    }
     if (this.viewport) this.viewport.classList.remove('hr-hide-ui');
-    if (this.plugin && this.plugin.restoreSidebars) this.plugin.restoreSidebars();
   }
 
   buildScope() {
@@ -1862,9 +2159,13 @@ class ReaderView extends ItemView {
     reg([], 'PageUp', () => this.prev());
     reg([], ' ', () => this.next());
     reg(['Shift'], ' ', () => this.prev());
-    reg([], 'Home', () => this.goTo(0));
-    reg([], 'End', () => this.goTo(this.totalPages - 1));
-    reg([], 'Escape', () => this.exitReadingChrome());
+    reg(['Shift'], 'ArrowRight', () => this.stepChapter(1));
+    reg(['Shift'], 'ArrowLeft', () => this.stepChapter(-1));
+    // Home/End — по всей КНИГЕ. Раньше они листали текущий блок рендера, то есть
+    // «в конец» уводило в случайное место где-то в первой трети тома
+    reg([], 'Home', () => this.goToBookEdge(0));
+    reg([], 'End', () => this.goToBookEdge(1));
+    reg([], 'Escape', () => this.onEscape());
     reg([], 'Backspace', () => this.jumpBack());
     reg(['Alt'], 'ArrowLeft', () => this.jumpBack());
     reg(['Mod'], 'f', () => this.openSearch());
@@ -1918,6 +2219,8 @@ class ReaderView extends ItemView {
         return;
       }
       if (e.touches.length !== 1) { abortDrag(); return; }
+      // палец лёг на полосу перемотки — тянут её, а не страницу
+      if (e.target && e.target.closest && e.target.closest('.hr-scrub')) { abortDrag(); return; }
       const tc = e.touches[0];
       const win = (vp.ownerDocument && vp.ownerDocument.defaultView) || window;
       if (Math.min(tc.clientX, win.innerWidth - tc.clientX) < OS_EDGE) { abortDrag(); return; }
@@ -2047,6 +2350,9 @@ class ReaderSettingTab extends PluginSettingTab {
       await this.plugin.saveAll();
       this.plugin.refreshOpenViews();
     };
+    // ползунки: onChange на каждый шаг, поэтому запись на диск откладываем
+    // общему автосохранению — иначе одна протяжка = десятки записей data.json
+    const live = () => this.plugin.queueSave();
     // разделы вместо сплошного списка: настроек два десятка, и половина из них
     // про одно и то же (геометрия страницы / текст / цвет / поведение)
     const section = (key) => new Setting(containerEl).setName(t(key)).setHeading();
@@ -2067,18 +2373,18 @@ class ReaderSettingTab extends PluginSettingTab {
       .setName(t('sMaxWidth'))
       .setDesc(t('sMaxWidthDesc'))
       .addSlider((sl) => sl.setLimits(0, 1000, 20).setValue(this.plugin.settings.maxPageWidth)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.maxPageWidth = v; await save(); }));
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.maxPageWidth = v; live(); }));
 
     new Setting(containerEl)
       .setName(t('sGap'))
       .addSlider((sl) => sl.setLimits(0.5, 5, 0.25).setValue(this.plugin.settings.columnGap)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.columnGap = v; await save(); }));
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.columnGap = v; live(); }));
 
     new Setting(containerEl)
       .setName(t('sPadding'))
       .setDesc(t('sPaddingDesc'))
       .addSlider((sl) => sl.setLimits(0, 4, 0.1).setValue(this.plugin.settings.verticalPadding)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.verticalPadding = v; await save(); }));
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.verticalPadding = v; live(); }));
 
     section('sSecText');
 
@@ -2086,7 +2392,7 @@ class ReaderSettingTab extends PluginSettingTab {
       .setName(t('sFontSize'))
       .setDesc(t('sFontSizeDesc'))
       .addSlider((sl) => sl.setLimits(0.6, 2.0, 0.05).setValue(this.plugin.settings.fontSize)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.fontSize = v; await save(); }));
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.fontSize = v; live(); }));
 
     new Setting(containerEl)
       .setName(t('sFontFamily'))
@@ -2113,7 +2419,7 @@ class ReaderSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName(t('sLineHeight'))
       .addSlider((sl) => sl.setLimits(1.2, 2.4, 0.05).setValue(this.plugin.settings.lineHeight)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.lineHeight = v; await save(); }));
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.lineHeight = v; live(); }));
 
     new Setting(containerEl)
       .setName(t('sJustify'))
@@ -2139,7 +2445,7 @@ class ReaderSettingTab extends PluginSettingTab {
       .setName(t('sBrightness'))
       .setDesc(t('sBrightnessDesc'))
       .addSlider((sl) => sl.setLimits(20, 100, 5).setValue(this.plugin.settings.brightness)
-        .setDynamicTooltip().onChange(async (v) => { this.plugin.settings.brightness = v; await save(); }));
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.brightness = v; live(); }));
 
     section('sSecReading');
 
@@ -3161,10 +3467,20 @@ class MdReaderPlugin extends Plugin {
     }
     this.db = loaded.positions || {};
     this.library = Array.isArray(loaded.library) ? loaded.library : []; // заметки, добавленные в библиотеку вручную
-    // измеренная скорость раскладки этой машины (мс на символ) — не настройка,
-    // а самозамер: по нему подбирается размер блока рендера
-    this.perf = (loaded.perf && typeof loaded.perf === 'object') ? { rate: loaded.perf.rate } : {};
+    // самозамеры, а не настройки: rate — скорость раскладки этой машины (мс на символ,
+    // по нему подбирается размер блока рендера), cpm — скорость чтения хозяина
+    // (символов в минуту, из неё считается «сколько осталось»)
+    this.perf = (loaded.perf && typeof loaded.perf === 'object')
+      ? { rate: loaded.perf.rate, cpm: loaded.perf.cpm }
+      : {};
+    // положение боковых панелей ДО того, как ридер их свернул. Переживает перезапуск:
+    // иначе закрытая с книгой программа возвращалась бы уже без панелей (см. collapseSidebars)
+    const sp = loaded.sidebarPrev;
+    this.sidebarPrev = (sp && typeof sp === 'object') ? { left: !!sp.left, right: !!sp.right } : null;
     this.lastSaved = JSON.stringify(this.dataBlob());
+    // «в памяти есть несохранённое»: без него автосохранение каждые две секунды
+    // сериализовало всю базу позиций впустую — даже когда ридер закрыт
+    this._dirty = false;
 
     this.registerView(VIEW_TYPE_READER, (leaf) => new ReaderView(leaf, this));
 
@@ -3205,6 +3521,10 @@ class MdReaderPlugin extends Plugin {
     readerCmd('toggle-bookmark', t('cmdBookmark'), (v) => v.toggleBookmark());
     readerCmd('open-bookmarks', t('cmdBookmarks'), (v) => v.openBookmarks());
     readerCmd('appearance', t('cmdAppearance'), (v) => v.openAppearance());
+    readerCmd('next-chapter', t('cmdNextChapter'), (v) => v.stepChapter(1));
+    readerCmd('prev-chapter', t('cmdPrevChapter'), (v) => v.stepChapter(-1));
+    readerCmd('edit-note', t('cmdEdit'), (v) => v.openInEditor());
+    readerCmd('exit-reader', t('cmdExit'), (v) => this.exitReader(v.leaf));
     readerCmd('jump-back', t('menuBack'), (v) => v.jumpBack());
     readerCmd('font-bigger', t('cmdFontBigger'), () => this.stepFontSize(1));
     readerCmd('font-smaller', t('cmdFontSmaller'), () => this.stepFontSize(-1));
@@ -3260,6 +3580,14 @@ class MdReaderPlugin extends Plugin {
         if (v && v.file) v.filePath = v.file.path;
       });
     }));
+    // заметку правят в соседней вкладке — ридер догоняет, а не показывает старый текст
+    this.registerEvent(this.app.vault.on('modify', (file) => {
+      this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((l) => {
+        // у отложенной (ещё не открытой) вкладки вместо вьюхи заглушка — instanceof обязателен
+        const v = l.view;
+        if (v instanceof ReaderView && v.file === file) v.scheduleReload();
+      });
+    }));
     this.registerEvent(this.app.vault.on('delete', (file) => {
       if (this.db[file.path]) delete this.db[file.path];
       this.library = this.library.filter((p) => p !== file.path && !p.startsWith(file.path + '/'));
@@ -3281,13 +3609,25 @@ class MdReaderPlugin extends Plugin {
     }));
 
     this.registerInterval(window.setInterval(() => {
+      if (!this._dirty) return;
+      this._dirty = false;
       const s = JSON.stringify(this.dataBlob());
       if (s !== this.lastSaved) { this.saveData(JSON.parse(s)); this.lastSaved = s; }
     }, 2000));
   }
 
+  // отложить запись на диск: ползунок настроек шлёт onChange на каждый шаг, и
+  // сохранять файл на каждый — значит писать его десятками раз за одну протяжку
+  queueSave() {
+    this._dirty = true;
+    this.refreshOpenViews();
+  }
+
   onunload() {
     // do NOT detach leaves here (keeps layout intact across plugin updates)
+    // панели вернуть ДО записи: иначе выключение плагина посреди книги оставило бы
+    // их свёрнутыми, и вернуть их было бы уже некому
+    this.restoreSidebars();
     this.saveData(this.dataBlob());
     this.setSysStatusBar(false); // вернуть системную панель, если прятали
     this.setFullscreen(document, false); // и окно из полного экрана
@@ -3303,16 +3643,22 @@ class MdReaderPlugin extends Plugin {
   }
 
   dataBlob() {
-    return Object.assign({}, this.settings, { positions: this.db, library: this.library, perf: this.perf });
+    return Object.assign({}, this.settings, {
+      positions: this.db, library: this.library, perf: this.perf, sidebarPrev: this.sidebarPrev,
+    });
   }
 
   async saveAll() {
     const blob = this.dataBlob();
+    this._dirty = false;
     await this.saveData(blob);
     this.lastSaved = JSON.stringify(blob);
   }
 
   async openReader(file) {
+    // заходим в книгу — значит заходим и в иммерсив, даже если в прошлый раз
+    // хром был показан руками
+    this._chromeShown = false;
     // книга уже открыта в ридере — показать ту вкладку, а не плодить копии.
     // Путь берём из состояния ЛИСТА, а не из view: у отложенной (ещё не открытой
     // после перезапуска) вкладки вместо вьюхи лежит заглушка без наших полей
@@ -3326,6 +3672,7 @@ class MdReaderPlugin extends Plugin {
       this.applyImmersive(open);
       if (this.settings.fullscreen && Platform.isDesktop) this.setFullscreen(this.docForLeaf(open), true);
       this.db[file.path] = Object.assign({}, this.db[file.path], { t: Date.now() });
+      this._dirty = true;
       return;
     }
 
@@ -3363,9 +3710,9 @@ class MdReaderPlugin extends Plugin {
   libraryFiles() {
     const out = [];
     const seen = new Set();
-    const folder = this.settings.importFolder
-      ? this.app.vault.getAbstractFileByPath(this.settings.importFolder)
-      : null; // пустая настройка = корень vault; его НЕ листаем — там весь vault, а не библиотека
+    // пустая настройка = корень vault; его НЕ листаем — там весь vault, а не библиотека.
+    // Ищем без учёта регистра: «books» в настройке и «Books» в хранилище — одна папка
+    const folder = this.settings.importFolder ? this.resolvePath(this.settings.importFolder) : null;
     if (folder instanceof TFolder) {
       // вместе с подпапками: книги удобно раскладывать по авторам/сериям.
       // Папки картинок (…​.assets) пропускаем — .md там всё равно нет
@@ -3439,7 +3786,26 @@ class MdReaderPlugin extends Plugin {
     // дёргало бы data.json на каждом замере
     if (!prev || Math.abs(next - prev) / prev > 0.15) {
       this.perf.rate = Math.round(next * 1e9) / 1e9;
+      this._dirty = true;
     }
+  }
+
+  /* ---------- скорость чтения хозяина ---------- */
+  // По ней в строке состояния считается «сколько осталось». Копится сама, из
+  // обычного листания: подгонять её руками никто не станет
+  noteReadSpeed(chars, ms) {
+    if (!(chars > 0) || !(ms > 0)) return;
+    const cpm = chars / (ms / 60000);
+    if (cpm < 200 || cpm > 12000) return; // не чтение: пролистнули или заснули над строкой
+    const prev = this.perf.cpm;
+    this.perf.cpm = Math.round(prev > 0 ? prev * 0.8 + cpm * 0.2 : cpm);
+    this._dirty = true;
+  }
+
+  // 1200 символов в минуту ≈ 200 слов — средний темп по прозе. Пока своей оценки нет
+  readingSpeed() {
+    const cpm = this.perf && this.perf.cpm;
+    return cpm > 0 ? cpm : 1200;
   }
 
   blockTargets() {
@@ -3465,10 +3831,9 @@ class MdReaderPlugin extends Plugin {
     this.commitFontSize();
   }
 
-  commitFontSize() {
-    this.saveAll();
-    this.refreshOpenViews();
-  }
+  // размер меняют очередями — хоткеем на удержании и щипком; на диск кладём
+  // отложенно, чтобы не писать data.json на каждый шаг
+  commitFontSize() { this.queueSave(); }
 
   async addToLibrary(path) {
     if (!this.library.includes(path)) this.library.push(path);
@@ -3534,15 +3899,16 @@ class MdReaderPlugin extends Plugin {
       }
 
       const title = sanitizeFilename(result.title || base);
-      await this.ensureFolder(folder);
+      // дальше работаем с папкой в её НАСТОЯЩЕМ регистре: если пользователь написал
+      // в настройке «books», а в хранилище лежит «Books», книга должна лечь туда же
+      const dir = await this.ensureFolder(folder);
 
       if (result.images && result.images.length) {
-        const assets = (folder ? folder + '/' : '') + slugify(title) + '.assets';
-        await this.ensureFolder(assets);
+        const assets = await this.ensureFolder((dir ? dir + '/' : '') + slugify(title) + '.assets');
         for (const img of result.images) await this.writeBinarySafe(assets + '/' + img.name, img.bytes);
       }
 
-      const outPath = await this.uniquePath(folder, title, 'md');
+      const outPath = await this.uniquePath(dir, title, 'md');
       const outFile = await this.app.vault.create(outPath, result.markdown);
       new Notice(t('convertDone'));
       this.openReader(outFile);
@@ -3552,16 +3918,39 @@ class MdReaderPlugin extends Plugin {
     }
   }
 
+  /* ---------- пути: регистр ----------
+     Obsidian ищет по пути С УЧЁТОМ регистра, а Windows и macOS — без. Значит
+     getAbstractFileByPath('books') вернёт null при существующей папке «Books», и
+     createFolder('books') полезет создавать её поверх уже существующей — то есть
+     в то же самое место на диске. Тот же расклад у vault.create для файлов.
+     Поэтому все пути, которые мы собираемся СОЗДАВАТЬ, ищем без учёта регистра. */
+  resolvePath(path) {
+    if (!path) return null;
+    const direct = this.app.vault.getAbstractFileByPath(path);
+    if (direct) return direct;
+    const want = path.toLowerCase();
+    // полный перебор только на промахе — а промах бывает раз в импорт
+    return this.app.vault.getAllLoadedFiles().find((f) => f.path.toLowerCase() === want) || null;
+  }
+
+  // существующий путь в его настоящем регистре (или исходный, если такого ещё нет)
+  realPath(path) {
+    const f = this.resolvePath(path);
+    return f ? f.path : path;
+  }
+
+  // -> путь папки в её настоящем регистре
   async ensureFolder(path) {
-    if (!path) return;
-    if (!this.app.vault.getAbstractFileByPath(path)) {
-      try { await this.app.vault.createFolder(path); } catch (e) { /* уже создана параллельно */ }
-    }
+    if (!path) return '';
+    const found = this.resolvePath(path);
+    if (found) return found.path;
+    try { await this.app.vault.createFolder(path); } catch (e) { /* уже создана параллельно */ }
+    return this.realPath(path);
   }
 
   async writeBinarySafe(path, bytes) {
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    const existing = this.app.vault.getAbstractFileByPath(path);
+    const existing = this.resolvePath(path);
     if (existing instanceof TFile) await this.app.vault.modifyBinary(existing, ab);
     else await this.app.vault.createBinary(path, ab);
   }
@@ -3570,29 +3959,59 @@ class MdReaderPlugin extends Plugin {
     const dir = folder ? folder + '/' : '';
     let name = base;
     let i = 1;
-    while (this.app.vault.getAbstractFileByPath(dir + name + '.' + ext)) name = base + ' (' + (i++) + ')';
+    while (this.resolvePath(dir + name + '.' + ext)) name = base + ' (' + (i++) + ')';
     return dir + name + '.' + ext;
   }
 
   collapseSidebars() {
     if (!this.settings.collapseSidebars) return;
     const ls = this.app.workspace.leftSplit, rs = this.app.workspace.rightSplit;
-    if (!this._sidebarPrev) {
-      this._sidebarPrev = {
-        left: ls ? ls.collapsed : true,
-        right: rs ? rs.collapsed : true,
+    // Запоминаем положение панелей ОДИН раз за заход в чтение — и на диск.
+    // Obsidian сохраняет свою раскладку как есть: закрыл программу с открытой книгой —
+    // при следующем запуске панели уже свёрнуты, и без записи мы бы посчитали, что
+    // такими они и были. Тогда панели не возвращались бы уже никогда
+    if (!this.sidebarPrev) {
+      this.sidebarPrev = {
+        left: ls ? !!ls.collapsed : true,
+        right: rs ? !!rs.collapsed : true,
       };
+      this._dirty = true;
     }
     if (ls && !ls.collapsed) ls.collapse();
     if (rs && !rs.collapsed) rs.collapse();
   }
 
   restoreSidebars() {
-    if (!this.settings.collapseSidebars || !this._sidebarPrev) return;
+    // на настройку намеренно НЕ смотрим: если её выключили посреди чтения, панели
+    // всё равно надо вернуть — свернули их мы, и больше это сделать некому
+    if (!this.sidebarPrev) return;
     const ls = this.app.workspace.leftSplit, rs = this.app.workspace.rightSplit;
-    if (ls && this._sidebarPrev.left === false && ls.collapsed) ls.expand();
-    if (rs && this._sidebarPrev.right === false && rs.collapsed) rs.expand();
-    this._sidebarPrev = null;
+    if (ls && this.sidebarPrev.left === false && ls.collapsed) ls.expand();
+    if (rs && this.sidebarPrev.right === false && rs.collapsed) rs.expand();
+    this.sidebarPrev = null;
+    this._dirty = true;
+  }
+
+  /* ---------- выход из чтения ---------- */
+  // Одно действие вместо трёх: вернуть интерфейс ровно в то положение, в каком он был
+  // до книги (панели, шапка, полный экран, системная панель ОС), и закрыть вкладку
+  exitReader(leaf) {
+    let target = leaf;
+    if (!target) {
+      const active = this.app.workspace.getActiveViewOfType(ReaderView);
+      target = active ? active.leaf : null;
+    }
+    const doc = this.docForLeaf(target);
+    this.setFullscreen(doc, false);
+    this.setSysStatusBar(false);
+    this._chromeShown = false;
+    this.markReaderTabs(null);
+    if (doc.body) doc.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
+    if (this._immersiveDoc === doc) this._immersiveDoc = null;
+    this.restoreSidebars();
+    // вкладку закрываем последней: detach уводит активность на соседний лист,
+    // а тот через active-leaf-change снова полезет разбираться с иммерсивом
+    if (target) target.detach();
   }
 
   docForLeaf(leaf) {
@@ -3671,7 +4090,12 @@ class MdReaderPlugin extends Plugin {
       // он другой и ещё жив (у закрытого попап-документа body === null)
       const prev = this._immersiveDoc;
       if (prev && prev !== doc && prev.body) prev.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
-      if (doc.body) doc.body.classList.add('hr-immersive', 'hr-chrome-hidden');
+      if (doc.body) {
+        doc.body.classList.add('hr-immersive');
+        // хром, показанный вручную (тап по центру или Escape), больше не прячется сам:
+        // раньше переключение вкладок туда-обратно возвращало его в спрятанное состояние
+        doc.body.classList.toggle('hr-chrome-hidden', !this._chromeShown);
+      }
       this._immersiveDoc = doc;
     } else {
       // ушли из ридера в ЭТОМ документе — снимаем классы только здесь. Чужой
@@ -3679,11 +4103,10 @@ class MdReaderPlugin extends Plugin {
       if (doc.body) doc.body.classList.remove('hr-immersive', 'hr-chrome-hidden');
       if (this._immersiveDoc === doc) this._immersiveDoc = null;
     }
-    // боковые панели: свёрнуты пока активен ридер, возвращаются когда уходишь из него
-    if (this.settings.collapseSidebars) {
-      if (isReader) this.collapseSidebars();
-      else this.restoreSidebars();
-    }
+    // боковые панели: свёрнуты пока активен ридер, возвращаются когда уходишь из него.
+    // Возврат вне проверки настройки — её могли выключить, пока панели уже свёрнуты нами
+    if (isReader) this.collapseSidebars();
+    else this.restoreSidebars();
     // системная панель ОС (моб.): прячем пока активен иммерсивный ридер и включена опция
     if (Platform.isMobile) this.setSysStatusBar(on && this.settings.hideMobileBar);
     // ушли из ридера — вернуть окно из полного экрана (на выход жест не нужен)

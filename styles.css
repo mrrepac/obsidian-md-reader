@@ -419,6 +419,19 @@
   background: linear-gradient(to top, var(--background-primary) 35%, transparent);
   pointer-events: none;
 }
+/* Полоса прогресса — она же перемотка по книге. Сама полоса в 3 пиксела, пальцем
+   в неё не попасть, поэтому указатель ловит обёртка с отступами сверху и снизу.
+   touch-action: none — иначе браузер решит, что горизонтальную протяжку он разберёт сам */
+.hr-scrub {
+  /* ловим палец сверху, где над полосой всё равно пустой градиент; вниз лезем
+     только на промежуток до строки статуса — иначе съели бы верх её букв,
+     а по ней открывают меню навигации */
+  padding: 10px 0 4px;
+  margin: -10px 0 -4px;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+}
 .hr-progress {
   height: 3px;
   width: 100%;
@@ -426,6 +439,11 @@
   border-radius: 2px;
   overflow: hidden;
 }
+/* во время протяжки полоса заметно толще — через transform, а не height:
+   высота сдвинула бы вниз строку статуса прямо под пальцем.
+   И без плавности: заполнение должно идти ровно за пальцем, а не догонять его */
+.hr-scrub.is-scrubbing .hr-progress { transform: scaleY(1.8); }
+.hr-scrub.is-scrubbing .hr-progress-fill { transition: none; }
 /* заполнение тянем через scaleX: width — свойство раскладки, и её анимация
    пересчитывалась бы браузером все 200 мс каждого перелистывания */
 .hr-progress-fill {
@@ -464,6 +482,11 @@
 }
 .hr-status-bm,
 .hr-status-pos { flex: none; }
+/* «сколько осталось» — подсказка, а не показание: тише процента */
+.hr-status-left {
+  flex: none;
+  color: var(--text-faint);
+}
 /* узлы строки состояния живут постоянно, пустые не должны занимать место */
 .hr-status-text > span:empty { display: none; }
 

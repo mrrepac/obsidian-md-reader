@@ -14,11 +14,17 @@ It also **imports FB2, EPUB and TXT books into Markdown**, so a whole library li
 - **Single page or two-page spread.** Two pages on wide screens, one on narrow windows and phones — or force a mode.
 - **Remembers your place** in every note, as a fraction of the whole book — so it survives font-size, width and theme changes, and matches up between desktop and phone.
 - **Table of contents, full-book search and bookmarks.** Tap the progress percentage in the status bar to open the menu (also available as commands).
+- **Scrub the progress bar.** Drag it to move anywhere in the book; the percentage and the chapter you are heading for follow your finger. Landed in the wrong place? One step back returns you.
+- **Chapter at a time.** `Shift+←` / `Shift+→` step through the table of contents, not through internal render blocks. Stepping back from the middle of a chapter returns to its start first, as e-readers do.
+- **Time left.** The status bar says roughly how long the rest of the book will take, from *your* measured reading speed — it learns as you read, with no setting to set.
+- **Open the note for editing.** Spotted a typo in your own note? The menu opens the source in a tab at the current chapter. Edits made anywhere in Obsidian show up in the reader by themselves.
 - **Reading progress** in the status bar, weighted across the whole book, with the **current chapter** next to it — a bare number tells you nothing in a thousand-page novel.
+- **Hyphenation follows the book,** not the interface: an English novel is not hyphenated by Russian rules just because Obsidian is in Russian.
 - **Appearance panel.** Font size, line height, margins, page width, tint, brightness and page mode — from the reading menu, without leaving the book. On a phone that used to mean walking out of immersive mode into the plugin settings.
 - **Font size on the fly.** `Ctrl/Cmd` `+` / `−` on the desktop, pinch with two fingers on the phone.
 - **Back to where I was.** Jumped off to a heading, a search hit or a bookmark — one step returns you to the page you were reading (`Backspace`, `Alt+←`, or the menu).
-- **The end.** The last page says so, and offers the library instead of a page that just won't turn.
+- **The end.** The last page says so, and offers the library, or a way out, instead of a page that just won't turn.
+- **Leaving puts everything back.** One action — the menu, a command, the end screen, or `Esc` twice — closes the reader and returns the workspace exactly as it was: side panels, header, tab bar, full screen, the OS status bar on a phone. The panel state is kept on disk, so it survives quitting Obsidian with a book open.
 - **Immersive reading.** Hides the app header and the mobile/desktop bars so only the text remains. Tap the center of the page to bring them back. On desktop it can go into **real full screen**.
 - **Big books stay fast — and it tunes itself.** Long files are rendered one block at a time. Column layout is strictly linear in the amount of text, so the reader times its own layout and picks the block size that fits in about one frame **on your machine**: roughly 55 000 characters on a fast desktop, down to 20 000 on a slow one, without a setting to fiddle with. The next block is prepared in the background — but only once you are past the middle of the current one, and only while the main thread is idle. Blocks you have already read stay parsed, so paging back costs nothing. A 3 MB novel opens and flips without freezing, on the phone too.
 - **Reading comfort.** Reading font, page tint (sepia, cream, gray, night), brightness, justified text with hyphenation, adjustable margins, line height and page width.
@@ -42,7 +48,9 @@ While reading:
 
 - **Turn pages:** swipe, tap the left/right edge, arrow keys, `A` / `D`, `Space`, mouse wheel, or the `‹` `›` buttons.
 - **Toggle the interface:** tap the center of the page.
-- **Menu:** tap the percentage in the status bar → table of contents, search, back to where you were, appearance, add/remove bookmark, bookmarks.
+- **Menu:** tap the percentage in the status bar → table of contents, search, previous/next chapter, back to where you were, appearance, library, open the note for editing, add/remove bookmark, bookmarks, leave the reader.
+- **Leave:** `Esc` once brings the interface back without leaving the book; `Esc` again closes the reader and restores the workspace. Also in the menu, as a command, and on the end screen.
+- **Jump anywhere:** drag the progress bar at the very bottom. `Home` / `End` go to the start and the end of the whole book.
 - **Resize the text:** `Ctrl/Cmd` `+` / `−`, or pinch with two fingers.
 - **Select and copy** with the mouse — dragging across the text no longer flips the page.
 
@@ -55,6 +63,9 @@ While reading:
 | Open current note in MD Reader | Opens the active note in the reader. |
 | Open table of contents | Jump to any heading in the book. |
 | Search in this book | Search the whole book and jump to a hit. |
+| Next / Previous chapter | Step through the table of contents (`Shift+→` / `Shift+←`). |
+| Open the note for editing | Opens the source in a tab, at the current chapter. |
+| Leave the reader | Closes the book and puts the panels and the app chrome back. |
 | Back to where I was | Undo a jump to a heading, hit or bookmark. |
 | Appearance: font, tint, margins | The reading settings, without leaving the book. |
 | Increase / Decrease font size | Same as `Ctrl/Cmd` `+` / `−` while reading. |
@@ -114,7 +125,7 @@ node tests/logic.mjs
 node tests/ui.mjs
 ```
 
-`logic.mjs` covers chapter splitting, heading scanning, reading position, encodings and the TXT converter; `ui.mjs` builds the library, the appearance panel and the settings tab and checks what came out.
+`logic.mjs` covers chapter splitting, heading scanning, reading position, chapter navigation, time left, language detection, encodings and the TXT converter; `ui.mjs` builds the library, the appearance panel and the settings tab, checks path handling on case-insensitive file systems and how the side panels are restored, and checks what came out.
 
 ## License
 

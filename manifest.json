@@ -1,7 +1,7 @@
 {
   "id": "md-reader",
   "name": "MD Reader",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "minAppVersion": "1.4.0",
   "description": "Read your notes and books like an e-book: pages you flip sideways by swipe, tap or arrow keys, with a library, contents, search and bookmarks. Imports fb2, epub and txt to Markdown.",
   "author": "mrrepac",

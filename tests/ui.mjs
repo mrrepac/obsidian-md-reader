@@ -124,7 +124,9 @@ const booksFolder = new TFolderStub('Books', files.filter((f) => f.path.startsWi
 byPath.set('Books', booksFolder);
 const app = {
   vault: {
+    // как в Obsidian: строго по регистру
     getAbstractFileByPath: (p) => byPath.get(p) || null,
+    getAllLoadedFiles: () => Array.from(byPath.values()),
     getMarkdownFiles: () => files,
   },
   workspace: { getLeavesOfType: () => [], getActiveViewOfType: () => null },
@@ -237,14 +239,62 @@ eq('замер: шум не трогает data.json', perf.perf.rate, rate0);
 perf.noteLayoutRate(60, 60000);
 ok('замер: заметное замедление записывается', perf.perf.rate > rate0, perf.perf.rate);
 
+/* ---------- регистр путей ----------
+   Obsidian ищет по пути с учётом регистра, Windows и macOS — нет. Промах здесь
+   означает createFolder поверх существующей папки, то есть потерю её содержимого */
+const paths = Object.create(T.MdReaderPlugin.prototype);
+const created = [];
+paths.app = {
+  vault: Object.assign({}, app.vault, {
+    createFolder: async (p) => { created.push(p); },
+    createBinary: async () => {},
+    modifyBinary: async () => {},
+  }),
+};
+paths.settings = Object.assign({}, T.DEFAULT_SETTINGS, { importFolder: 'books' });
+paths.db = {};
+paths.library = [];
+eq('регистр: папка находится в другом регистре', paths.resolvePath('books').path, 'Books');
+eq('регистр: точное совпадение — без перебора', paths.resolvePath('Books').path, 'Books');
+eq('регистр: файл в другом регистре', paths.resolvePath('books/ЧУМА.md').path, 'Books/Чума.md');
+ok('регистр: несуществующего пути нет', paths.resolvePath('Нет/такой.md') === null);
+eq('регистр: настоящий регистр пути', paths.realPath('books'), 'Books');
+eq('регистр: неизвестный путь остаётся как есть', paths.realPath('Новое'), 'Новое');
+eq('регистр: библиотека читает папку из настройки', paths.libraryFiles().map((x) => x.file.path),
+  ['Books/Чума.md', 'Books/Война и мир.md']);
+const folderReal = await paths.ensureFolder('books');
+eq('регистр: ensureFolder возвращает существующую', folderReal, 'Books');
+eq('регистр: поверх существующей папки ничего не создано', created, []);
+const fresh = await paths.ensureFolder('Новая папка');
+eq('регистр: новую папку создаём', created, ['Новая папка']);
+eq('регистр: и возвращаем её путь', fresh, 'Новая папка');
+const uniq = await paths.uniquePath('books', 'ЧУМА', 'md');
+eq('регистр: имя файла не сталкивается с иным регистром', uniq, 'books/ЧУМА (1).md');
+
 /* ---------- выбор заметки ---------- */
 const pick = new T.NotePickModal(app, plugin, () => {});
 const sugg = pick.getSuggestions('');
 ok('добавить заметку: книги из папки скрыты', !sugg.some((f) => f.path.startsWith('Books/')), sugg.map((f) => f.path));
 ok('добавить заметку: «недавнее» доступно для закрепления', sugg.some((f) => f.path === 'Заметки/Дневник.md'));
 
+/* ---------- скорость чтения ---------- */
+const rd = Object.create(T.MdReaderPlugin.prototype);
+rd.perf = {};
+eq('чтение: без замеров берём средний темп', rd.readingSpeed(), 1200);
+rd.noteReadSpeed(1500, 60000);            // 1500 символов за минуту
+eq('чтение: первая оценка', rd.perf.cpm, 1500);
+ok('чтение: замер помечает данные несохранёнными', rd._dirty === true);
+rd.noteReadSpeed(3000, 60000);            // вдвое быстрее — сглаживаем, а не прыгаем
+eq('чтение: оценка сглажена', rd.perf.cpm, 1800);
+rd.noteReadSpeed(100, 60000);             // застрял на странице
+eq('чтение: неправдоподобно медленно — не считаем', rd.perf.cpm, 1800);
+rd.noteReadSpeed(600000, 60000);          // пролистнул книгу
+eq('чтение: неправдоподобно быстро — не считаем', rd.perf.cpm, 1800);
+eq('чтение: своя скорость подхвачена', rd.readingSpeed(), 1800);
+
 /* ---------- загрузка плагина целиком ---------- */
-globalThis.window = globalThis.window || { setInterval: () => 1 };
+let tick = null;
+globalThis.window = { setInterval: (fn) => { tick = fn; return 1; } };
 const boot = Object.create(T.MdReaderPlugin.prototype);
 const seen = { views: [], commands: [], ribbon: 0, tabs: 0, events: 0, intervals: 0 };
 boot.app = {
@@ -266,13 +316,136 @@ eq('onload: панель настроек и иконка ленты', [seen.tab
 ok('onload: события подписаны', seen.events >= 4, seen.events);
 const need = ['open-library', 'continue-reading', 'open-current-in-reader', 'open-toc', 'search-book',
   'toggle-bookmark', 'open-bookmarks', 'appearance', 'jump-back', 'font-bigger', 'font-smaller',
-  'cycle-tint', 'import-book', 'toggle-fullscreen'];
+  'cycle-tint', 'import-book', 'toggle-fullscreen', 'next-chapter', 'prev-chapter', 'edit-note',
+  'exit-reader'];
 eq('onload: все команды на месте', need.filter((id) => !seen.commands.includes(id)), []);
 eq('onload: настройка из data.json подхвачена', boot.settings.fontSize, 1.2);
 ok('onload: чужие ключи в настройки не попали', boot.settings['чужойКлюч'] === undefined);
 eq('onload: позиции и библиотека прочитаны', [Object.keys(boot.db).length, boot.library], [1, ['b.md']]);
 ok('onload: замер скорости инициализирован', typeof boot.perf === 'object' && !boot.perf.rate);
 ok('onload: perf уходит в data.json', 'perf' in boot.dataBlob());
+
+/* ---------- автосохранение просыпается только когда есть что писать ---------- */
+let writes = 0;
+boot.saveData = async () => { writes++; };
+boot.refreshOpenViews = () => {};
+ok('автосохранение: тикер подхвачен', typeof tick === 'function');
+tick(); tick();
+eq('автосохранение: без изменений не пишем', writes, 0);
+boot.db['новая.md'] = { g: 0.3, t: 1 };
+boot._dirty = true;
+tick();
+eq('автосохранение: изменение записано', writes, 1);
+tick();
+eq('автосохранение: второй раз то же самое не пишем', writes, 1);
+// ползунок настроек копит правки в памяти, а не долбит диск на каждый шаг
+boot.settings.lineHeight = 1.9;
+boot.queueSave();
+boot.settings.lineHeight = 2.0;
+boot.queueSave();
+eq('ползунок: диск не трогали', writes, 1);
+tick();
+eq('ползунок: записалось один раз', writes, 2);
+
+/* ---------- выход из чтения и возврат панелей ---------- */
+const mkClassList = () => {
+  const set = new Set();
+  return {
+    add: (...c) => c.forEach((x) => set.add(x)),
+    remove: (...c) => c.forEach((x) => set.delete(x)),
+    contains: (c) => set.has(c),
+    toggle: (c, on) => { const v = on === undefined ? !set.has(c) : on; if (v) set.add(c); else set.delete(c); return v; },
+    list: () => Array.from(set).sort(),
+  };
+};
+const mkSplit = (collapsed) => ({
+  collapsed,
+  collapse() { this.collapsed = true; },
+  expand() { this.collapsed = false; },
+});
+const mkPanels = (opts) => {
+  const p = Object.create(T.MdReaderPlugin.prototype);
+  p.settings = Object.assign({}, T.DEFAULT_SETTINGS, opts.settings);
+  p.db = {}; p.library = []; p.perf = {};
+  p.sidebarPrev = opts.sidebarPrev === undefined ? null : opts.sidebarPrev;
+  p.left = mkSplit(opts.left);
+  p.right = mkSplit(opts.right);
+  p.app = { workspace: { leftSplit: p.left, rightSplit: p.right, getActiveViewOfType: () => null } };
+  return p;
+};
+globalThis.document = { body: { classList: mkClassList() } };
+
+// обычный заход: панели свернулись и вернулись
+const a = mkPanels({ left: false, right: false });
+a.collapseSidebars();
+eq('панели: свернулись при входе в книгу', [a.left.collapsed, a.right.collapsed], [true, true]);
+eq('панели: положение записано', a.sidebarPrev, { left: false, right: false });
+ok('панели: запись помечена несохранённой', a._dirty === true);
+a.collapseSidebars();                    // повторный вход в ту же книгу
+eq('панели: повторный вход не перетирает память', a.sidebarPrev, { left: false, right: false });
+a.restoreSidebars();
+eq('панели: вернулись как были', [a.left.collapsed, a.right.collapsed], [false, false]);
+eq('панели: память очищена', a.sidebarPrev, null);
+
+// то, из-за чего панели пропадали: Obsidian закрыли с открытой книгой и запустили снова —
+// в его раскладке панели уже свёрнуты, но наша запись пережила перезапуск
+const b = mkPanels({ left: true, right: true, sidebarPrev: { left: false, right: true } });
+b.collapseSidebars();
+eq('перезапуск: свёрнутое состояние не подменило память', b.sidebarPrev, { left: false, right: true });
+b.restoreSidebars();
+eq('перезапуск: левая вернулась, правая осталась свёрнутой', [b.left.collapsed, b.right.collapsed], [false, true]);
+
+// настройку выключили посреди чтения — панели всё равно наши, вернуть обязаны
+const c2 = mkPanels({ left: false, right: false });
+c2.collapseSidebars();
+c2.settings.collapseSidebars = false;
+c2.restoreSidebars();
+eq('панели: выключенная настройка не мешает вернуть', [c2.left.collapsed, c2.right.collapsed], [false, false]);
+// а закрытая книга ничего не разворачивает сама по себе
+const d2 = mkPanels({ left: true, right: true });
+d2.restoreSidebars();
+eq('панели: без нашей записи ничего не трогаем', [d2.left.collapsed, d2.right.collapsed], [true, true]);
+
+// «Выйти из чтения»: интерфейс на место, вкладка закрыта
+const ex = mkPanels({ left: false, right: false });
+ex.collapseSidebars();
+const readerDoc = { body: { classList: mkClassList() } };
+readerDoc.body.classList.add('hr-immersive', 'hr-chrome-hidden');
+ex._immersiveDoc = readerDoc;
+ex._chromeShown = true;
+let detached = 0;
+const leaf = { view: { contentEl: { ownerDocument: readerDoc } }, detach: () => { detached++; } };
+ex.exitReader(leaf);
+eq('выход: классы иммерсива сняты', readerDoc.body.classList.list(), []);
+eq('выход: панели вернулись', [ex.left.collapsed, ex.right.collapsed], [false, false]);
+eq('выход: вкладка закрыта', detached, 1);
+ok('выход: ссылка на документ отпущена', ex._immersiveDoc === null);
+ok('выход: следующая книга снова откроется в иммерсиве', ex._chromeShown === false);
+
+// выключение плагина посреди книги тоже возвращает панели
+const off = mkPanels({ left: false, right: false });
+off.collapseSidebars();
+off.saveData = async () => {};
+off.setSysStatusBar = () => {};
+off.setFullscreen = () => {};
+off.onunload();
+eq('выключение плагина: панели вернулись', [off.left.collapsed, off.right.collapsed], [false, false]);
+ok('выключение плагина: в data.json ушло пустое положение', off.dataBlob().sidebarPrev === null);
+
+/* ---------- положение панелей переживает перезапуск ---------- */
+const boot2 = Object.create(T.MdReaderPlugin.prototype);
+boot2.app = {
+  vault: Object.assign({ on: () => ({}) }, app.vault),
+  workspace: Object.assign({ on: () => ({}) }, app.workspace),
+};
+boot2.loadData = async () => ({ sidebarPrev: { left: false, right: true } });
+boot2.saveData = async () => {};
+boot2.registerView = () => {}; boot2.addRibbonIcon = () => new El();
+boot2.addCommand = () => {}; boot2.registerEvent = () => {}; boot2.addSettingTab = () => {};
+boot2.registerInterval = () => {};
+await boot2.onload();
+eq('перезапуск: положение панелей прочитано', boot2.sidebarPrev, { left: false, right: true });
+ok('перезапуск: положение уходит обратно в data.json', 'sidebarPrev' in boot2.dataBlob());
 
 console.log(`\n${pass} прошло, ${fail} упало`);
 process.exit(fail ? 1 : 0);

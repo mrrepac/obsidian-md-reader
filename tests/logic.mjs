@@ -11,7 +11,8 @@ import Module from 'node:module';
 const SRC = fileURLToPath(new URL('../main.js', import.meta.url));
 const source = readFileSync(SRC, 'utf8') +
   '\nmodule.exports.__test = { scanHeadings, splitChapters, chunkBySize, txtToMarkdown,' +
-  ' normHeading, escapeMd, escapeBlockStart, decodeBuffer, ReaderView, sanitizeFilename };\n';
+  ' normHeading, escapeMd, escapeBlockStart, decodeBuffer, ReaderView, sanitizeFilename,' +
+  ' guessLang };\n';
 
 class Stub { constructor() {} }
 class ItemViewStub { constructor(leaf) { this.leaf = leaf; } }
@@ -174,10 +175,6 @@ eq('escapeBlockStart: решётка', T.escapeBlockStart('# не заголов
 eq('escapeMd: спецсимволы', T.escapeMd('a*b[c]<d>'), 'a\\*b\\[c\\]\\<d\\>');
 
 /* ---------- кодировки ---------- */
-const enc = (s, cp) => {
-  const map = { 'cp1251': 0x350, 'utf8': 0 };
-  return null; // ниже используем готовые байты
-};
 const utf8 = new TextEncoder().encode('Привет, мир');
 eq('decodeBuffer: utf-8', T.decodeBuffer(utf8.buffer), 'Привет, мир');
 const bom = new Uint8Array([0xEF, 0xBB, 0xBF, ...new TextEncoder().encode('BOM')]);
@@ -189,6 +186,142 @@ const declared = new TextEncoder().encode('<?xml version="1.0" encoding="utf-8"?
 ok('decodeBuffer: объявленная кодировка', T.decodeBuffer(declared.buffer).includes('FictionBook'));
 
 eq('sanitizeFilename: чистит запрещённое', T.sanitizeFilename('А/Б: "В" <Г>|#^[]'), 'А Б В Г');
+
+/* ---------- язык текста (переносы) ---------- */
+eq('язык: русская проза', T.guessLang('Князь Андрей вышел из комнаты и затворил за собою дверь.'), 'ru');
+eq('язык: английская проза', T.guessLang('It was the best of times, it was the worst of times.'), 'en');
+eq('язык: не гадаем по цифрам', T.guessLang('12 + 34 = 46\n\n2026-08-06'), '');
+
+/* ---------- строка исходника в оглавлении ---------- */
+const lined = T.splitChapters('преамбула\n\n# Первая\n\nтекст\n\n## Вторая\n\nещё');
+eq('оглавление: номера строк заголовков', lined.toc.map((e) => e.line), [2, 6]);
+const bigLined = T.splitChapters(Array.from({ length: 12 }, (_, i) => bigChapter(i + 1)).join('\n'));
+ok('оглавление: строки есть и у разрезанной книги',
+  bigLined.toc.every((e) => typeof e.line === 'number' && e.line >= 0), bigLined.toc.slice(0, 3));
+ok('оглавление: строки растут', bigLined.toc.every((e, i, a) => i === 0 || e.line > a[i - 1].line));
+
+/* ---------- шаг по главам и края книги ---------- */
+const nav = Object.create(T.ReaderView.prototype);
+nav.toc = [
+  { text: 'Глава 1', level: 2, chapter: 0, hIndex: 0, line: 0 },
+  { text: 'Глава 2', level: 2, chapter: 0, hIndex: 1, line: 40 },
+  { text: 'Глава 3', level: 2, chapter: 1, hIndex: 0, line: 90 },
+];
+nav.chapters = ['a', 'b'];
+nav.chapterIndex = 0;
+nav._headPages = [{ page: 0, toc: 0 }, { page: 4, toc: 1 }];
+nav.page = 5;
+eq('глава: где мы сейчас', nav.currentTocIndex(), 1);
+ok('глава: середина главы — не её начало', !nav.atChapterStart(1));
+nav.page = 4;
+ok('глава: начало главы распознано', nav.atChapterStart(1));
+// шаг назад из середины главы возвращает к её началу, а не к предыдущей
+const jumped = [];
+nav.savePos = () => {};
+nav.pushJump = () => {};
+nav.goToHeading = () => jumped.push('same-block');
+nav.resolveHeadingEl = () => ({});
+nav.renderChapter = (ch, opts) => jumped.push(ch + ':' + opts.heading.text);
+nav.page = 5;
+nav.stepChapter(-1);
+eq('глава: назад из середины — к началу главы', jumped, ['same-block']);
+nav.page = 4;         // ровно на начале второй главы
+nav.stepChapter(1);
+eq('глава: вперёд уходит в следующий блок', jumped[1], '1:Глава 3');
+nav.page = 4;
+nav.stepChapter(-1);
+eq('глава: назад с начала — к предыдущей главе', jumped[2], 'same-block');
+// у книги без заголовков шагать нечем — и это не должно падать
+const noToc = Object.create(T.ReaderView.prototype);
+noToc.toc = [];
+noToc.stepChapter(1);
+ok('глава: без оглавления не падаем', true);
+
+/* ---------- открыть исходник на текущем месте ---------- */
+const ed = Object.create(T.ReaderView.prototype);
+const opened = [];
+ed.file = { path: 'книга.md', basename: 'книга' };
+ed.bodyLine0 = 4;                       // выше тела — frontmatter из четырёх строк
+ed.toc = nav.toc;
+ed.chapterIndex = 0;
+ed._headPages = [{ page: 0, toc: 0 }, { page: 4, toc: 1 }];
+ed.page = 5;
+ed.savePos = () => {};
+ed.app = { workspace: { getLeaf: () => ({ openFile: (f, o) => opened.push([f.path, o.eState.line]) }) } };
+ed.openInEditor();
+eq('редактор: строка = frontmatter + строка главы', opened[0], ['книга.md', 44]);
+ed.toc = [];
+ed._headPages = null;
+ed.openInEditor();
+eq('редактор: без оглавления открываем с начала', opened[1], ['книга.md', 0]);
+
+/* ---------- сколько осталось ---------- */
+const left = Object.create(T.ReaderView.prototype);
+left._measured = true;
+left.chapters = ['a'];
+left.chapterIndex = 0;
+left.chapterChars = [120000];
+left.charsBefore = [0];
+left.totalChars = 120000;
+left.totalPages = 101;
+left.page = 0;
+left.plugin = { readingSpeed: () => 1200 };
+// в песочнице язык интерфейса английский — отсюда «h/min»
+eq('остаток: часы и минуты', left.timeLeftLabel(), '≈1 h 40 min');
+left.page = 100;
+eq('остаток: в конце книги пусто', left.timeLeftLabel(), '');
+left.page = 95;
+eq('остаток: минуты', left.timeLeftLabel(), '≈5 min');
+left._measured = false;
+eq('остаток: до замера молчим', left.timeLeftLabel(), '');
+
+/* ---------- Escape в два шага ---------- */
+const esc = Object.create(T.ReaderView.prototype);
+const body = new Set();
+const doc = { body: { classList: {
+  contains: (c) => body.has(c),
+  remove: (...c) => c.forEach((x) => body.delete(x)),
+} } };
+esc.contentEl = { ownerDocument: doc };
+esc.viewport = { classList: { contains: (c) => c === 'hr-hide-ui' && esc._uiHidden, remove: () => { esc._uiHidden = false; } } };
+esc.leaf = { id: 'L' };
+const done = [];
+esc.plugin = {
+  isFullscreen: () => esc._fs,
+  setFullscreen: () => { esc._fs = false; },
+  restoreSidebars: () => done.push('panels'),
+  exitReader: (l) => done.push('exit:' + l.id),
+};
+body.add('hr-immersive'); body.add('hr-chrome-hidden');
+ok('escape: спрятанный хром распознан', esc.chromeHidden());
+esc.onEscape();
+eq('escape: первый шаг вернул интерфейс', [Array.from(body), done], [[], ['panels']]);
+ok('escape: хром помечен показанным вручную', esc.plugin._chromeShown === true);
+ok('escape: прятать больше нечего', !esc.chromeHidden());
+esc.onEscape();
+eq('escape: второй шаг выходит из чтения', done, ['panels', 'exit:L']);
+// полный экран тоже считается спрятанным интерфейсом
+esc._fs = true;
+ok('escape: полный экран — тоже спрятанный интерфейс', esc.chromeHidden());
+esc.onEscape();
+eq('escape: из полного экрана выходим, но из книги — нет', done.length, 3);
+
+/* ---------- подпись при перемотке ---------- */
+const scrub = Object.create(T.ReaderView.prototype);
+scrub.chapters = ['a', 'b', 'c'];
+scrub.chapterChars = [100, 100, 100];
+scrub.charsBefore = [0, 100, 200];
+scrub.totalChars = 300;
+scrub.toc = [
+  { text: 'Начало', level: 1, chapter: 0, hIndex: 0, line: 0 },
+  { text: 'Середина', level: 1, chapter: 1, hIndex: 0, line: 10 },
+  { text: 'Конец', level: 1, chapter: 2, hIndex: 0, line: 20 },
+];
+eq('перемотка: подпись в начале', scrub.chapterAtG(0), 'Начало');
+eq('перемотка: подпись в середине', scrub.chapterAtG(0.5), 'Середина');
+eq('перемотка: подпись в конце', scrub.chapterAtG(1), 'Конец');
+scrub.toc = [];
+eq('перемотка: без оглавления пусто', scrub.chapterAtG(0.5), '');
 
 console.log(`\n${pass} прошло, ${fail} упало`);
 process.exit(fail ? 1 : 0);
