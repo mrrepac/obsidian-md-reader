@@ -29,7 +29,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          if [ -f "release-notes/$TAG.md" ]; then
+            NOTES=(--notes-file "release-notes/$TAG.md")
+          else
+            NOTES=(--notes "Release $TAG")
+          fi
           gh release create "$TAG" \
             --title "$TAG" \
-            --notes "Release $TAG" \
+            "${NOTES[@]}" \
             main.js manifest.json styles.css

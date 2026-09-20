@@ -40,6 +40,12 @@ const DEFAULT_SETTINGS = {
   hideMobileBar: false,   // (mobile) also hide the OS status bar while reading — experimental
   justify: false,         // justify paragraphs (align to both edges) + hyphenation
   verticalPadding: 1.4,   // em — empty space at the top/bottom of the page
+  horizontalPadding: 24, // px — minimum outside margins; maxPageWidth may add more
+  showProgressBar: true,
+  showReadingPosition: true,
+  showChapterName: true,
+  showTimeLeft: true,
+  quoteFolder: 'Books/Quotes',
   importFolder: '',       // vault folder for imported/converted books ('' = vault root)
 };
 
@@ -51,6 +57,36 @@ const READING_FONTS = {
 };
 const TINTS = ['sepia', 'cream', 'gray', 'night'];
 const TINT_LABEL = { none: 'optTintNone', sepia: 'optTintSepia', cream: 'optTintCream', gray: 'optTintGray', night: 'optTintNight' };
+
+// Presets only change appearance. Library, reading positions and behaviour stay intact.
+const APPEARANCE_KEYS = ['fontSize', 'fontFamily', 'fontFamilyCustom', 'tint', 'brightness',
+  'lineHeight', 'pageMode', 'maxPageWidth', 'columnGap', 'verticalPadding', 'horizontalPadding', 'justify'];
+const READING_PRESETS = {
+  book: { fontFamily: 'serif', fontSize: 1.1, lineHeight: 1.6, maxPageWidth: 600, horizontalPadding: 24, verticalPadding: 1.4, tint: 'cream', pageMode: 'auto' },
+  compact: { fontFamily: 'sans', fontSize: 1, lineHeight: 1.45, maxPageWidth: 760, horizontalPadding: 12, verticalPadding: 0.6, tint: 'none', pageMode: 'single' },
+  night: { fontFamily: 'serif', fontSize: 1.1, lineHeight: 1.65, maxPageWidth: 600, horizontalPadding: 24, verticalPadding: 1.4, tint: 'night', pageMode: 'auto' },
+};
+
+function applyReadingPreset(settings, name) {
+  for (const key of APPEARANCE_KEYS) settings[key] = DEFAULT_SETTINGS[key];
+  if (READING_PRESETS[name]) Object.assign(settings, READING_PRESETS[name]);
+}
+
+const READING_STATUS_OPTIONS = [
+  ['showProgressBar', 'sShowProgress', 'hr-no-progress'],
+  ['showReadingPosition', 'sShowPosition', 'hr-no-position'],
+  ['showChapterName', 'sShowChapter', 'hr-no-chapter'],
+  ['showTimeLeft', 'sShowTime', 'hr-no-time'],
+];
+
+function addReadingStatusSettings(container, plugin, save) {
+  new Setting(container).setName(t('sStatusSection')).setHeading();
+  for (const [key, label] of READING_STATUS_OPTIONS) {
+    new Setting(container).setName(t(label)).addToggle((toggle) => toggle
+      .setValue(plugin.settings[key] !== false)
+      .onChange((value) => { plugin.settings[key] = value; save(); }));
+  }
+}
 
 /* ---------- i18n: English by default, Russian when Obsidian language is ru ---------- */
 const STRINGS = {
@@ -127,6 +163,25 @@ const STRINGS = {
     sJustify: 'Justify text',
     sJustifyDesc: 'Align paragraphs to both edges, with hyphenation where the platform supports it (the desktop build has no hyphenation dictionaries). Costs about half again as much page layout — the first thing to turn off on a slow machine',
     sPadding: 'Vertical margins, em',
+    sSidePadding: 'Side margins, px',
+    sSidePaddingDesc: 'Minimum space on each side. A limited page width can leave more space.',
+    presetBook: 'Book', presetCompact: 'Compact', presetNight: 'Night',
+    resetAppearance: 'Reset appearance',
+    appearanceHint: 'Changes appear in the open book immediately. Reset only changes appearance.',
+    menuButton: 'Menu',
+    sStatusSection: 'Reading progress',
+    sShowProgress: 'Show progress bar',
+    sShowPosition: 'Show page number and percentage',
+    sShowChapter: 'Show chapter name',
+    sShowTime: 'Show time left',
+    quoteSave: 'Save selected text as a quote',
+    quoteCopy: 'Copy selected text',
+    quoteSelect: 'Select text in the book first.',
+    quoteSaved: 'Quote saved: ',
+    quoteFailed: 'Could not save the quote. Check the quotes folder in MD Reader settings.',
+    quoteFolderName: 'Quotes folder',
+    quoteFolderDesc: 'One Markdown note per book. Path inside the vault; empty uses Books/Quotes.',
+    quoteTitle: 'Quotes',
     sPaddingDesc: 'Empty space at the top and bottom of the page',
     cmdTint: 'Cycle page tint',
     cmdToc: 'Open table of contents',
@@ -261,6 +316,25 @@ const STRINGS = {
     sJustify: 'Выравнивание по ширине',
     sJustifyDesc: 'Ровнять абзацы по обоим краям, с переносами там, где их поддерживает платформа (в десктопной сборке словарей переносов нет). Вёрстка страницы при этом дороже примерно в полтора раза — на медленной машине выключать в первую очередь',
     sPadding: 'Вертикальные поля, em',
+    sSidePadding: 'Боковые поля, px',
+    sSidePaddingDesc: 'Минимальный отступ с каждой стороны. Ограничение ширины страницы может увеличить поля.',
+    presetBook: 'Книга', presetCompact: 'Компактно', presetNight: 'Ночь',
+    resetAppearance: 'Сбросить оформление',
+    appearanceHint: 'Изменения сразу видны в открытой книге. Сброс затрагивает только оформление.',
+    menuButton: 'Меню',
+    sStatusSection: 'Прогресс чтения',
+    sShowProgress: 'Показывать полосу прогресса',
+    sShowPosition: 'Показывать номер страницы и процент',
+    sShowChapter: 'Показывать название главы',
+    sShowTime: 'Показывать оставшееся время',
+    quoteSave: 'Сохранить выделенное как цитату',
+    quoteCopy: 'Скопировать выделенное',
+    quoteSelect: 'Сначала выделите текст в книге.',
+    quoteSaved: 'Цитата сохранена: ',
+    quoteFailed: 'Не удалось сохранить цитату. Проверьте папку цитат в настройках MD Reader.',
+    quoteFolderName: 'Папка цитат',
+    quoteFolderDesc: 'Отдельная Markdown-заметка для каждой книги. Путь внутри хранилища; пустое поле — Books/Quotes.',
+    quoteTitle: 'Цитаты',
     sPaddingDesc: 'Пустое место сверху и снизу страницы',
     cmdTint: 'Переключить тонировку страницы',
     cmdToc: 'Открыть оглавление',
@@ -412,7 +486,7 @@ class BookmarkSuggestModal extends SuggestModal {
       this.inputEl.dispatchEvent(new Event('input'));
     });
   }
-  onChooseSuggestion(b) { this.view.pushJump(); this.view.goToG(b.g); }
+  onChooseSuggestion(b) { this.view.pushJump(); this.view.goToBookmark(b); }
 }
 
 /* ============================================================
@@ -562,6 +636,18 @@ class AppearanceModal extends Modal {
     // отдаём это общему автосохранению (см. queueSave)
     const live = () => p.queueSave();
 
+    contentEl.createDiv({ cls: 'hr-ap-hint', text: t('appearanceHint') });
+    const presets = contentEl.createDiv('hr-ap-presets');
+    for (const [name, label] of [['book', 'presetBook'], ['compact', 'presetCompact'], ['night', 'presetNight']]) {
+      const button = presets.createEl('button', { cls: 'hr-ap-preset', text: t(label) });
+      button.addEventListener('click', () => {
+        applyReadingPreset(p.settings, name);
+        save();
+        contentEl.empty();
+        this.onOpen();
+      });
+    }
+
     // размер шрифта — двумя большими кнопками: это то, ради чего сюда заходят,
     // а ползунок в модалке пальцем не поймать
     const size = contentEl.createDiv('hr-ap-size');
@@ -598,8 +684,21 @@ class AppearanceModal extends Modal {
 
     slider('sLineHeight', 'lineHeight', 1.2, 2.4, 0.05);
     slider('sPadding', 'verticalPadding', 0, 4, 0.1);
+    slider('sSidePadding', 'horizontalPadding', 0, 80, 2);
     slider('sMaxWidth', 'maxPageWidth', 0, 1000, 20);
     slider('sBrightness', 'brightness', 20, 100, 5);
+
+    new Setting(contentEl).setName(t('sFontFamily')).addDropdown((d) => d.addOptions({
+      '': t('optFontTheme'), serif: t('optFontSerif'), sans: t('optFontSans'),
+      mono: t('optFontMono'), custom: t('optFontCustom'),
+    }).setValue(p.settings.fontFamily).onChange((v) => {
+      p.settings.fontFamily = v; save(); contentEl.empty(); this.onOpen();
+    }));
+    if (p.settings.fontFamily === 'custom') {
+      new Setting(contentEl).setName(t('sFontCustom')).addText((tx) => tx
+        .setValue(p.settings.fontFamilyCustom).setPlaceholder('Georgia, serif')
+        .onChange((v) => { p.settings.fontFamilyCustom = v; live(); }));
+    }
 
     new Setting(contentEl)
       .setName(t('sPageMode'))
@@ -614,6 +713,16 @@ class AppearanceModal extends Modal {
       .setName(t('sJustify'))
       .addToggle((tg) => tg.setValue(p.settings.justify)
         .onChange((v) => { p.settings.justify = v; save(); }));
+
+    addReadingStatusSettings(contentEl, p, save);
+
+    const reset = contentEl.createEl('button', { cls: 'hr-ap-reset', text: t('resetAppearance') });
+    reset.addEventListener('click', () => {
+      applyReadingPreset(p.settings, 'default');
+      save();
+      contentEl.empty();
+      this.onOpen();
+    });
   }
 
   onClose() { this.contentEl.empty(); }
@@ -807,7 +916,138 @@ function touchDist(touches) {
 /* ============================================================
    Reader view
    ============================================================ */
+// Text anchors are additive: old {g}, {fraction}, and bookmarks remain readable.
+// The quote identifies the place; preceding text distinguishes repeated passages.
+function normalizeAnchorText(text) { return String(text || '').replace(/\s+/g, ' ').trim(); }
+
+function anchorSourceText(markdown) {
+  return normalizeAnchorText(String(markdown || '')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[\[([^\]|]*\|)?([^\]]+)\]\]/g, '$2')
+    .replace(/<[^>]*>/g, '')
+    .replace(/[*_`~]/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-+]\s+|\d+\.\s+)/gm, ''));
+}
+
+function anchorMatch(text, anchor, hint = 0) {
+  if (!anchor || typeof anchor.quote !== 'string' || !anchor.quote || anchor.quote.length > 200) return null;
+  let best = null;
+  let start = text.indexOf(anchor.quote);
+  while (start >= 0) {
+    const prefix = typeof anchor.prefix === 'string' ? anchor.prefix.slice(-48) : '';
+    let context = 0;
+    for (let k = 1; k <= prefix.length && start >= k; k++) {
+      if (text[start - k] !== prefix[prefix.length - k]) break;
+      context++;
+    }
+    const distance = Math.abs(start / Math.max(1, text.length) - hint);
+    if (!best || context > best.context || (context === best.context && distance < best.distance)) best = { start, context, distance };
+    start = text.indexOf(anchor.quote, start + Math.max(1, anchor.quote.length));
+  }
+  return best;
+}
+
+// A compact mapping from normalized rendered text to DOM character positions.
+// Keep inline formatting transparent, but separate paragraphs with a space.
+function readerTextIndex(content) {
+  const doc = content.ownerDocument;
+  if (!doc || !doc.createTreeWalker) return null;
+  const walker = doc.createTreeWalker(content, 4 /* SHOW_TEXT */);
+  const segments = [];
+  const chars = [];
+  let node, previousBlock = null;
+  while ((node = walker.nextNode())) {
+    const parent = node.parentElement;
+    if (!parent || parent.closest('.hr-title, .markdown-embed, script, style, button, .copy-code-button, .katex-mathml') || !parent.getClientRects().length) continue;
+    const block = parent.closest('p, li, h1, h2, h3, h4, h5, h6, pre, td, th, blockquote');
+    if (block !== previousBlock && chars.length && chars[chars.length - 1] !== ' ') chars.push(' ');
+    previousBlock = block;
+    const segment = { node, start: chars.length, offsets: [] };
+    for (let i = 0; i < node.nodeValue.length; i++) {
+      const ch = /\s/.test(node.nodeValue[i]) ? ' ' : node.nodeValue[i];
+      if (ch === ' ' && (!chars.length || chars[chars.length - 1] === ' ')) continue;
+      chars.push(ch);
+      segment.offsets.push(i);
+    }
+    if (segment.offsets.length) segments.push(segment);
+  }
+  const rangeAt = (index) => {
+    let lo = 0, hi = segments.length - 1, segment = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (segments[mid].start <= index) { segment = segments[mid]; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (!segment) return null;
+    const offset = segment.offsets[index - segment.start];
+    if (offset === undefined) return null; // synthetic paragraph separator
+    const range = doc.createRange();
+    range.setStart(segment.node, offset);
+    range.setEnd(segment.node, offset + 1);
+    return range;
+  };
+  return { text: chars.join(''), rangeAt };
+}
+
 class ReaderView extends ItemView {
+  textIndex() {
+    if (!this.content || !this.content.ownerDocument) return null;
+    if (!this._anchorIndex) this._anchorIndex = readerTextIndex(this.content);
+    return this._anchorIndex;
+  }
+
+  captureAnchor() {
+    if (!this._measured || !this.pageStride) return null;
+    const index = this.textIndex();
+    if (!index || !index.text) return null;
+    // Find the first character on this page, including a paragraph continued
+    // from a preceding page. Range queries are logarithmic in chapter size.
+    let lo = 0, hi = index.text.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      let range = index.rangeAt(mid);
+      if (!range) range = index.rangeAt(mid + 1);
+      const page = range ? this.pageOfRect(this.firstRect(range)) : this.page;
+      if (page < this.page) lo = mid + 1; else hi = mid;
+    }
+    while (lo < index.text.length && (!index.rangeAt(lo) || index.text[lo] === ' ')) lo++;
+    const range = index.rangeAt(lo);
+    if (!range || this.pageOfRect(this.firstRect(range)) !== this.page) return null;
+    return { v: 1, quote: index.text.slice(lo, lo + 96), prefix: index.text.slice(Math.max(0, lo - 48), lo),
+      hint: (((this.charsBefore || [])[this.chapterIndex] || 0) + (lo / index.text.length) * ((this.chapterChars || [])[this.chapterIndex] || 0)) / (this.totalChars || 1) };
+  }
+
+  anchorPage(anchor) {
+    const index = this.textIndex();
+    if (!index) return null;
+    const hint = this.blockForG(anchor && anchor.hint || 0).within;
+    const match = anchorMatch(index.text, anchor, hint);
+    const range = match && index.rangeAt(match.start);
+    return range ? this.pageOfRect(this.firstRect(range)) : null;
+  }
+
+  anchorChapter(anchor, g) {
+    if (!anchor || !this.chapters) return this.blockForG(g).chapter;
+    let best = null;
+    for (let chapter = 0; chapter < this.chapters.length; chapter++) {
+      const text = anchorSourceText(this.chapters[chapter]);
+      const match = anchorMatch(text, anchor, this.blockForG(anchor.hint || g).within);
+      if (!match) continue;
+      const global = ((this.charsBefore[chapter] || 0) + match.start / Math.max(1, text.length) * this.chapterChars[chapter]) / (this.totalChars || 1);
+      const distance = Math.abs(global - (anchor.hint || g || 0));
+      if (!best || match.context > best.context || (match.context === best.context && distance < best.distance)) best = { chapter, context: match.context, distance };
+    }
+    return best ? best.chapter : this.blockForG(g).chapter;
+  }
+
+  retainLayoutAnchor() {
+    if (!this._pendingAnchor && !this._pendingHeading && !this._pendingFind && this._measured) {
+      this._pendingAnchor = this._readingAnchor || this.captureAnchor();
+      if (this._pendingAnchor) this._pendingFraction = this.totalPages > 1 ? this.page / (this.totalPages - 1) : 0;
+    }
+  }
+
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -823,6 +1063,10 @@ class ReaderView extends ItemView {
     this._scope = null;
     this._scopePushed = false;
     this._pendingFraction = 0;
+    this._pendingAnchor = null;
+    this._readingAnchor = null;
+    this._anchorIndex = null;
+    this._keepAnchor = null;
     this._lastTouch = 0;
     this._debouncedRemeasure = null;
     this._renderGen = 0;
@@ -923,7 +1167,22 @@ class ReaderView extends ItemView {
     // текст статуса («34%») кликабелен — открывает меню навигации. Это главная точка
     // входа на телефоне: в иммерсивном режиме нижняя панель Obsidian спрятана,
     // и до палитры команд оттуда не добраться
-    this.statusText = bar.createDiv('hr-status-text');
+    const tools = bar.createDiv('hr-reader-tools');
+    const menuButton = tools.createEl('button', { cls: 'hr-reader-menu', text: t('menuButton'), attr: { 'aria-label': t('menuNav'), 'aria-haspopup': 'menu' } });
+    this.statusText = tools.createDiv('hr-status-text');
+    const appearanceButton = tools.createEl('button', { cls: 'hr-reader-appearance', text: 'Aa', attr: { 'aria-label': t('menuAppearance'), title: t('menuAppearance') } });
+    this.quoteButton = tools.createEl('button', { cls: 'hr-reader-quote', text: '❞', attr: { 'aria-label': t('quoteSave'), title: t('quoteSave') } });
+    this.quoteButton.hidden = true;
+    // Preserve the browser selection when a mouse click focuses the button.
+    this.registerDomEvent(this.quoteButton, 'mousedown', (e) => e.preventDefault());
+    this.registerDomEvent(this.quoteButton, 'click', (e) => { e.stopPropagation(); this.saveSelectedQuote(); });
+    this.setupQuoteSelection();
+    this.registerDomEvent(menuButton, 'click', (e) => {
+      e.stopPropagation();
+      const rect = menuButton.getBoundingClientRect();
+      this.openNavMenu({ clientX: rect.left, clientY: rect.top });
+    });
+    this.registerDomEvent(appearanceButton, 'click', (e) => { e.stopPropagation(); this.openAppearance(); });
     // три готовых узла на всю жизнь вьюхи: закладка, название главы, позиция.
     // Пустые прячет CSS (span:empty), чтобы не оставалось лишних промежутков
     this._statusEls = {
@@ -948,6 +1207,7 @@ class ReaderView extends ItemView {
   }
 
   async onClose() {
+    ++this._renderGen; // invalidate file reads/renders still in flight
     this.popScope();
     this.hideEnd();
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
@@ -977,8 +1237,10 @@ class ReaderView extends ItemView {
     this.discardPrefetch(); // предзагруженный блок относится к прежнему файлу
     this.clearCache();      // и отложенные соседние блоки — тоже
     this._searchIndex = null;
+    this._bookmarkChapters = new Map();
     this._jumps = [];       // «назад» — в пределах одной книги
     this._blockReady = false;
+    this._measured = false;
     if (!this.file) {
       this.chapters = null; this.toc = []; this.chapterIndex = 0;
       this.content.empty();
@@ -1017,6 +1279,8 @@ class ReaderView extends ItemView {
     // на блоки (у ПК и телефона оно разное). Легаси-форматы: {chapter, fraction}
     // (v1.4, поблочная) и просто {fraction} (v1.1 — тоже глобальная по смыслу)
     const keep = this._keepG;
+    const keepAnchor = this._keepAnchor;
+    this._keepAnchor = null;
     this._keepG = null;
     this.resetSpeedSample();
     const saved = keep == null && this.plugin.settings.rememberPosition && this.plugin.db[this.file.path];
@@ -1030,7 +1294,9 @@ class ReaderView extends ItemView {
     }
     g = Math.max(0, Math.min(1, g));
     const at = this.blockForG(g);
-    await this.renderChapter(at.chapter, { fraction: at.within });
+    const anchor = keepAnchor || (saved && saved.anchor);
+    const chapter = anchor ? this.anchorChapter(anchor, g) : at.chapter;
+    await this.renderChapter(chapter, { fraction: chapter === at.chapter ? at.within : 0, anchor });
   }
 
   // глобальная доля книги -> {chapter, within}: номер блока рендера и доля внутри него
@@ -1078,11 +1344,16 @@ class ReaderView extends ItemView {
     this._blockReady = false;
 
     this.content.empty();
+    this._anchorIndex = null;
+    this._readingAnchor = null;
+    this._selectedQuote = null;
+    if (this.quoteButton) this.quoteButton.hidden = true;
     this.content.style.transform = 'translateX(0px)';
     this.page = 0;
     this._measured = false;
     this._pendingHeading = opts.heading || null;
     this._pendingFind = opts.find || null;
+    this._pendingAnchor = opts.anchor || null;
     this._pendingFraction = (opts.heading || opts.find) ? 0 : (opts.fraction || 0);
 
     // блок уже разобран — отложен при уходе назад или подготовлен предзагрузкой.
@@ -1248,14 +1519,20 @@ class ReaderView extends ItemView {
   /* ---------- measure & paginate (set content width AND column width together) ---------- */
   measure() {
     if (!this.content || !this.viewport) return;
+    // ResizeObserver also fires for a newly opened, still empty view. Until
+    // Markdown is ready, measuring would turn that empty page into 100%.
+    if (this._blockReady === false) return;
     const s = this.plugin.settings;
     const vpW = this.viewport.clientWidth;
     if (!vpW) return;
 
     const gap = parseFloat(getComputedStyle(this.content).columnGap) || 0;
 
-    const OUTER = 24;
-    const avail = Math.max(120, vpW - OUTER * 2);
+    // Keep the usual 24px margins, but let very narrow split panes shrink.
+    // A 120px floor can make the text wider than its clipping container.
+    const configuredPadding = Number.isFinite(s.horizontalPadding) ? Math.max(0, Math.min(80, s.horizontalPadding)) : 24;
+    const outer = Math.min(configuredPadding, vpW / 4);
+    const avail = Math.max(1, vpW - outer * 2);
 
     let n = 1;
     if (s.pageMode === 'double') n = 2;
@@ -1289,7 +1566,15 @@ class ReaderView extends ItemView {
     // высоту и число страниц, поэтому долю/прыжок применяем заново после каждой догрузки
     const mediaLoading = Array.from(this.content.querySelectorAll('img')).some((im) => !im.complete);
 
-    if (this._pendingFind) {
+    if (this._pendingAnchor) {
+      const page = this.anchorPage(this._pendingAnchor);
+      this.page = page == null ? Math.round(this._pendingFraction * (this.totalPages - 1)) : page;
+      if (!mediaLoading) {
+        this._readingAnchor = page == null ? null : this._pendingAnchor;
+        this._pendingAnchor = null;
+        this._pendingFraction = 0;
+      }
+    } else if (this._pendingFind) {
       // прыжок к найденному месту: ищем совпадение в отрисованном тексте, а если
       // разметка не дала его найти — падаем на долю по символам исходника
       const f = this._pendingFind;
@@ -1327,7 +1612,7 @@ class ReaderView extends ItemView {
     this.savePos();
 
     // блок стабилен (позиция восстановлена, картинки на месте) — фоново готовим следующий
-    if (!mediaLoading && !this._pendingHeading && !this._pendingFind && !this._pendingFraction) this.schedulePrefetch();
+    if (!mediaLoading && !this._pendingAnchor && !this._pendingHeading && !this._pendingFind && !this._pendingFraction) this.schedulePrefetch();
   }
 
   applyTransform() {
@@ -1338,6 +1623,8 @@ class ReaderView extends ItemView {
 
   goTo(p) {
     const np = Math.max(0, Math.min(p, this.totalPages - 1));
+    if (np !== this.page) this._readingAnchor = null;
+    if (np !== this.page) { this._selectedQuote = null; if (this.quoteButton) this.quoteButton.hidden = true; }
     this.page = isFinite(np) ? np : 0;
     this.hideEnd();
     this.applyTransform();
@@ -1454,6 +1741,7 @@ class ReaderView extends ItemView {
   previewFontSize(v) {
     const size = Math.max(0.6, Math.min(2, Math.round(v * 20) / 20));
     if (size === this.plugin.settings.fontSize) return;
+    this.retainLayoutAnchor();
     this.plugin.settings.fontSize = size;
     this.plugin._dirty = true;
     if (this.content) this.content.style.setProperty('--hr-font-size', size + 'em');
@@ -1616,6 +1904,8 @@ class ReaderView extends ItemView {
   /* ---------- navigation menu (главная точка входа: тап по проценту) ---------- */
   openNavMenu(evt) {
     const menu = new Menu();
+    const quote = this.selectedQuote() || this._selectedQuote;
+    if (quote) menu.addItem((i) => i.setTitle(t('quoteSave')).setIcon('quote').onClick(() => this.saveSelectedQuote(quote)));
     menu.addItem((i) => i.setTitle(t('menuToc')).setIcon('list').onClick(() => this.openToc()));
     menu.addItem((i) => i.setTitle(t('menuSearch')).setIcon('search').onClick(() => this.openSearch()));
     if (this.toc && this.toc.length) {
@@ -1650,10 +1940,70 @@ class ReaderView extends ItemView {
     menu.addSeparator();
     menu.addItem((i) => i.setTitle(t('menuExit')).setIcon('log-out')
       .onClick(() => this.plugin.exitReader(this.leaf)));
-    menu.showAtMouseEvent(evt);
+    menu.showAtPosition({ x: evt.clientX, y: evt.clientY });
   }
 
   /* ---------- search across the whole book ---------- */
+  selectedQuote() {
+    if (!this.content || !this.file) return null;
+    const selection = this.content.ownerDocument.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    if (!this.content.contains(range.startContainer) || !this.content.contains(range.endContainer)) return null;
+    const text = selection.toString().trim();
+    if (!text) return null;
+    // Use the heading preceding the selection, not the last heading on the
+    // page: several short sections can share a single spread.
+    let heading = '';
+    for (const entry of this.toc || []) {
+      if (entry.chapter < this.chapterIndex) { heading = entry.text; continue; }
+      if (entry.chapter > this.chapterIndex) break;
+      const el = this.resolveHeadingEl(entry.hIndex, entry.text);
+      if (el && (range.comparePoint(el, 0) < 0 || el.contains(range.startContainer))) heading = entry.text;
+    }
+    return { file: this.file, text, heading };
+  }
+
+  setupQuoteSelection() {
+    const doc = this.content.ownerDocument;
+    this.registerDomEvent(doc, 'selectionchange', () => {
+      const quote = this.selectedQuote();
+      const selection = doc.getSelection();
+      if (quote) {
+        this._selectedQuote = quote;
+        this.viewport.classList.remove('hr-hide-ui');
+      } else if (selection && ((!selection.isCollapsed) || this.content.contains(selection.anchorNode))) {
+        this._selectedQuote = null;
+      }
+      if (this.quoteButton) this.quoteButton.hidden = !this._selectedQuote;
+    });
+    this.registerDomEvent(this.content, 'contextmenu', (event) => {
+      const quote = this.selectedQuote();
+      if (!quote) return;
+      event.preventDefault(); event.stopPropagation();
+      const menu = new Menu();
+      menu.addItem((i) => i.setTitle(t('quoteSave')).setIcon('quote').onClick(() => this.saveSelectedQuote(quote)));
+      menu.addItem((i) => i.setTitle(t('quoteCopy')).setIcon('copy').onClick(() => {
+        doc.defaultView.navigator.clipboard.writeText(quote.text).catch((error) => console.error('MD Reader: copy failed', error));
+      }));
+      menu.showAtPosition({ x: event.clientX, y: event.clientY });
+    });
+  }
+
+  async saveSelectedQuote(snapshot) {
+    const quote = snapshot || this.selectedQuote() || this._selectedQuote;
+    if (!quote || quote.file !== this.file) { new Notice(t('quoteSelect')); return null; }
+    try {
+      const file = await this.plugin.saveQuote(quote);
+      new Notice(t('quoteSaved') + file.path);
+      return file;
+    } catch (error) {
+      console.error('MD Reader: quote could not be saved', error);
+      new Notice(t('quoteFailed'));
+      return null;
+    }
+  }
+
   openSearch() {
     if (!this.chapters) return;
     new BookSearchModal(this.app, this).open();
@@ -1765,6 +2115,7 @@ class ReaderView extends ItemView {
   }
 
   highlightRange(range) {
+    this._anchorIndex = null;
     try {
       const span = (this.content.ownerDocument || document).createElement('span');
       span.className = 'hr-hit';
@@ -1773,6 +2124,7 @@ class ReaderView extends ItemView {
   }
 
   clearHighlight() {
+    this._anchorIndex = null;
     if (!this.content) return;
     this.content.querySelectorAll('.hr-hit').forEach((el) => {
       const p = el.parentNode;
@@ -1809,7 +2161,35 @@ class ReaderView extends ItemView {
 
   bookmarkOnPage() {
     if (!this._measured) return null;
-    return this.bookmarks().find((b) => this.gToPage(b.g) === this.page) || null;
+    return this.bookmarks().find((b) => this.bookmarkPage(b) === this.page) || null;
+  }
+
+  bookmarkPage(bookmark) {
+    if (bookmark.anchor) {
+      if (!this._bookmarkChapters) this._bookmarkChapters = new Map();
+      if (!this._bookmarkChapters.has(bookmark)) this._bookmarkChapters.set(bookmark, this.anchorChapter(bookmark.anchor, bookmark.g));
+      if (this._bookmarkChapters.get(bookmark) !== this.chapterIndex) return null;
+      const page = this.anchorPage(bookmark.anchor);
+      if (page != null) return page;
+    }
+    return this.gToPage(bookmark.g);
+  }
+
+  goToBookmark(bookmark) {
+    if (!bookmark.anchor) { this.goToG(bookmark.g); return; }
+    const chapter = this.anchorChapter(bookmark.anchor, bookmark.g);
+    if (chapter === this.chapterIndex) {
+      const page = this.anchorPage(bookmark.anchor);
+      if (page != null) {
+        this.goTo(page);
+        this._readingAnchor = bookmark.anchor;
+        this.savePos();
+        return;
+      }
+    }
+    const at = this.blockForG(bookmark.g);
+    this.savePos();
+    this.renderChapter(chapter, { fraction: chapter === at.chapter ? at.within : 0, anchor: bookmark.anchor });
   }
 
   // подпись закладки — начало текста текущей страницы
@@ -1831,12 +2211,13 @@ class ReaderView extends ItemView {
   toggleBookmark() {
     if (!this.file || !this._measured) return;
     const list = this.bookmarks().slice();
-    const here = list.findIndex((b) => this.gToPage(b.g) === this.page);
+    const here = list.findIndex((b) => this.bookmarkPage(b) === this.page);
     if (here >= 0) {
       list.splice(here, 1);
       new Notice(t('bmRemoved'));
     } else {
-      list.push({ g: this.currentG(), label: this.pageLabel(), t: Date.now() });
+      const anchor = this.captureAnchor();
+      list.push({ g: this.currentG(), label: anchor ? anchor.quote.slice(0, 90) : this.pageLabel(), t: Date.now(), ...(anchor ? { anchor } : {}) });
       list.sort((a, b) => a.g - b.g);
       new Notice(t('bmAdded'));
     }
@@ -1922,12 +2303,15 @@ class ReaderView extends ItemView {
 
   savePos() {
     const s = this.plugin.settings;
-    if (!s.rememberPosition || !this.file) return;
     // не сохранять, пока вьюпорт не измерен: до первого замера totalPages=1/page=0,
     // и запись затёрла бы реальную закладку нулём при быстром закрытии/переключении
-    if (!this._measured) return;
+    if (!this._measured || this._blockReady === false) return;
     // позиция ещё восстанавливается (ждём догрузки картинок) — не затирать сохранённую
-    if (this._pendingFraction || this._pendingHeading || this._pendingFind) return;
+    if (this._pendingAnchor || this._pendingFraction || this._pendingHeading || this._pendingFind) return;
+    // Keep the original character through successive reflows, rather than
+    // repeatedly rounding the position back to the start of a new page.
+    if (!this._readingAnchor || this.anchorPage(this._readingAnchor) !== this.page) this._readingAnchor = this.captureAnchor();
+    if (!s.rememberPosition || !this.file) return;
     // g — глобальная доля по всей книге (взвешенно по символам): не зависит от
     // разбиения на блоки, поэтому позиция совпадает на ПК и телефоне,
     // хотя блоки у них разного размера.
@@ -1935,6 +2319,7 @@ class ReaderView extends ItemView {
     // b — закладки: переносим, а легаси-поля (fraction/chapter) осознанно теряем
     const prev = this.plugin.db[this.file.path];
     const rec = { g: this.currentG(), t: Date.now() };
+    if (this._readingAnchor) rec.anchor = this._readingAnchor;
     if (prev && Array.isArray(prev.b) && prev.b.length) rec.b = prev.b;
     this.plugin.db[this.file.path] = rec;
     this.plugin._dirty = true;
@@ -1944,12 +2329,8 @@ class ReaderView extends ItemView {
     const s = this.plugin.settings;
     const c = this.content;
     if (!c) return;
-    // ЧИТАЕМ до всех записей стилей. Обе величины от наших стилей не зависят
-    // (высота строки состояния и шрифт вьюпорта — от темы), а чтение после
-    // записи заставляло браузер считать раскладку лишний раз: раньше каждый
-    // пересчёт страниц стоил двух проходов вместо одного
+    // Read before writing styles to avoid an extra synchronous layout.
     const barH = this.statusBar ? this.statusBar.offsetHeight : 0;
-    const rootPx = this.viewport ? (parseFloat(getComputedStyle(this.viewport).fontSize) || 16) : 16;
     // шрифт чтения: пусто — берём шрифт темы (переменная просто не задана)
     const ff = s.fontFamily === 'custom' ? (s.fontFamilyCustom || '').trim() : (READING_FONTS[s.fontFamily] || '');
     if (ff) c.style.setProperty('--hr-font-family', ff);
@@ -1958,6 +2339,7 @@ class ReaderView extends ItemView {
     // поэтому за цветами тянется всё внутри — фон, текст, полоса прогресса
     const vp = this.viewport;
     if (vp) {
+      for (const [key, , cls] of READING_STATUS_OPTIONS) vp.classList.toggle(cls, s[key] === false);
       TINTS.forEach((n) => vp.classList.remove('hr-tint-' + n));
       const tint = TINTS.includes(s.tint) ? s.tint : '';
       vp.classList.toggle('hr-tinted', !!tint);
@@ -1978,14 +2360,10 @@ class ReaderView extends ItemView {
     // нижний отступ НЕ меньше фактической высоты строки статуса: она лежит поверх
     // страницы, и при малом значении ползунка последняя строка пряталась под
     // полосой прогресса. Высоту меряем, а не хардкодим — она зависит от шрифта темы
-    let bottomEm = padY + 0.6;
-    if (barH > 0) {
-      // em страницы = шрифт вьюпорта, умноженный на наш множитель (--hr-font-size)
-      const emPx = rootPx * (typeof s.fontSize === 'number' ? s.fontSize : 1);
-      const minEm = emPx > 0 ? (barH + 4) / emPx : 0;
-      if (minEm > bottomEm) bottomEm = minEm;
-    }
-    c.style.paddingBottom = bottomEm + 'em';
+    // Let CSS resolve em against the actual content font. A theme can change
+    // the inherited font between viewport and content, so converting through
+    // the viewport font can under-reserve space for the status bar.
+    c.style.paddingBottom = `max(${padY + 0.6}em, ${barH + 4}px)`;
     // выравнивание по ширине + переносы. Язык берём у САМОГО текста, а не у интерфейса:
     // от него зависят правила переноса, и книга не обязана быть на языке Obsidian
     c.classList.toggle('hr-justify', !!s.justify);
@@ -2075,6 +2453,7 @@ class ReaderView extends ItemView {
       // держимся за место долей книги, а не страницей: текст изменился, страницы поедут.
       // Через _keepG, а не через сохранённую позицию: «запоминать позицию» может быть выключено
       this._keepG = this._measured ? this.currentG() : null;
+      this._keepAnchor = this._readingAnchor || this.captureAnchor();
       this.renderFile();
     }, 900);
   }
@@ -2085,12 +2464,13 @@ class ReaderView extends ItemView {
       this._repaginateTimer = setTimeout(() => {
         this._repaginateTimer = null;
         if (!this.content || !this.content.isConnected) return;
+        this.retainLayoutAnchor();
         // поля зависят от размера шрифта и высоты строки статуса — пересчитать
         // перед замером (срабатывает и на смену темы: css-change ведёт сюда)
         this.applySettings();
         // позиция ещё не восстановлена (первый успешный замер после нулевой ширины) —
         // пусть measure() применит долю/прыжок к заголовку, не перетирая их текущим page=0
-        if (this._pendingFraction || this._pendingHeading || this._pendingFind) { this.measure(); return; }
+        if (this._pendingAnchor || this._pendingFraction || this._pendingHeading || this._pendingFind) { this.measure(); return; }
         const frac = this.totalPages > 1 ? this.page / (this.totalPages - 1) : 0;
         this.measure();
         this.page = Math.max(0, Math.min(Math.round(frac * (this.totalPages - 1)), this.totalPages - 1));
@@ -2105,6 +2485,8 @@ class ReaderView extends ItemView {
     this._debouncedRemeasure = repaginate;
     this.ro = new ResizeObserver(repaginate);
     this.ro.observe(this.viewport);
+    // Footer height can change independently (fonts, wrapping, status text).
+    if (this.statusBar) this.ro.observe(this.statusBar);
     this.registerEvent(this.app.workspace.on('css-change', repaginate));
     this.registerEvent(this.app.workspace.on('resize', repaginate));
   }
@@ -2238,6 +2620,8 @@ class ReaderView extends ItemView {
         return;
       }
       if (!dragging) return;
+      const selection = vp.ownerDocument.getSelection();
+      if (selection && !selection.isCollapsed && this.content.contains(selection.anchorNode)) { abortDrag(); return; }
       const tc = e.touches[0];
       const dx = tc.clientX - x0, dy = tc.clientY - y0;
       if (!decided) {
@@ -2359,6 +2743,10 @@ class ReaderSettingTab extends PluginSettingTab {
 
     section('sSecPage');
 
+    new Setting(containerEl).setName(t('sSidePadding')).setDesc(t('sSidePaddingDesc'))
+      .addSlider((sl) => sl.setLimits(0, 80, 2).setValue(this.plugin.settings.horizontalPadding)
+        .setDynamicTooltip().onChange((v) => { this.plugin.settings.horizontalPadding = v; live(); }));
+
     new Setting(containerEl)
       .setName(t('sPageMode'))
       .setDesc(t('sPageModeDesc'))
@@ -2449,6 +2837,8 @@ class ReaderSettingTab extends PluginSettingTab {
 
     section('sSecReading');
 
+    addReadingStatusSettings(containerEl, this.plugin, save);
+
     new Setting(containerEl)
       .setName(t('sAnimate'))
       .addToggle((tg) => tg.setValue(this.plugin.settings.animate)
@@ -2511,6 +2901,10 @@ class ReaderSettingTab extends PluginSettingTab {
 
     section('sImportSection');
 
+    new Setting(containerEl).setName(t('quoteFolderName')).setDesc(t('quoteFolderDesc'))
+      .addText((tx) => tx.setPlaceholder(DEFAULT_SETTINGS.quoteFolder).setValue(this.plugin.settings.quoteFolder)
+        .onChange((value) => { this.plugin.settings.quoteFolder = value.trim(); this.plugin.queueSave(); }));
+
     new Setting(containerEl)
       .setName(t('sImportNow'))
       .setDesc(t('sImportNowDesc'))
@@ -2550,6 +2944,26 @@ function slugify(name) {
 // экранировать markdown-спецсимволы в тексте книги (чтобы литеральные *_[]<> не форматировались)
 function escapeMd(s) {
   return String(s).replace(/([\\`*_[\]<>])/g, '\\$1');
+}
+
+function normalizeQuoteFolder(value) {
+  const path = String(value || '').trim().replace(/\\/g, '/').replace(/\/+$/, '') || DEFAULT_SETTINGS.quoteFolder;
+  if (path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..' || /[:*?"<>|\x00-\x1f]/.test(part))) {
+    throw new Error('Quotes folder must be a relative vault folder');
+  }
+  return path;
+}
+
+function quoteSourceFromNote(markdown) {
+  const frontmatter = String(markdown).match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  const marker = frontmatter && frontmatter[1].match(/^md-reader-source:\s*(.+)$/m);
+  if (!marker) return null;
+  try { return JSON.parse(marker[1]); } catch (_) { return null; }
+}
+
+function quoteBlock(text, link) {
+  const lines = String(text).trim().split(/\r?\n/).map(line => '> ' + escapeBlockStart(escapeMd(line)));
+  return lines.join('\n') + '\n\n— ' + link + '\n';
 }
 // экранировать символ в начале абзаца, который иначе стал бы разметкой блока
 // (важно для реплик через дефис "- ..." и строк, начинающихся с # > | =)
@@ -3524,6 +3938,7 @@ class MdReaderPlugin extends Plugin {
     readerCmd('next-chapter', t('cmdNextChapter'), (v) => v.stepChapter(1));
     readerCmd('prev-chapter', t('cmdPrevChapter'), (v) => v.stepChapter(-1));
     readerCmd('edit-note', t('cmdEdit'), (v) => v.openInEditor());
+    readerCmd('save-quote', t('quoteSave'), (v) => v.saveSelectedQuote());
     readerCmd('exit-reader', t('cmdExit'), (v) => this.exitReader(v.leaf));
     readerCmd('jump-back', t('menuBack'), (v) => v.jumpBack());
     readerCmd('font-bigger', t('cmdFontBigger'), () => this.stepFontSize(1));
@@ -3702,6 +4117,50 @@ class MdReaderPlugin extends Plugin {
     new Notice(t('sTint') + ': ' + t(TINT_LABEL[this.settings.tint]));
   }
 
+  // Serialize quote writes within this plugin. Vault.process also protects
+  // appends against edits made by the user while the note is open.
+  saveQuote(quote) {
+    const folder = normalizeQuoteFolder(this.settings.quoteFolder);
+    const operation = (this._quoteQueue || Promise.resolve()).catch(() => {}).then(async () => {
+      let dir = '';
+      for (const part of folder.split('/')) {
+        const path = dir ? dir + '/' + part : part;
+        let found = this.resolvePath(path);
+        if (!found) {
+          try { await this.app.vault.createFolder(path); }
+          catch (error) { if (!this.resolvePath(path)) throw error; }
+          found = this.resolvePath(path);
+        }
+        if (!(found instanceof TFolder)) throw new Error('Quotes folder is occupied by a file: ' + path);
+        dir = found.path;
+      }
+      let destination = null;
+      const prefix = dir + '/';
+      const candidates = this.app.vault.getMarkdownFiles().filter(file => file.path.startsWith(prefix) && !file.path.slice(prefix.length).includes('/'));
+      for (const file of candidates) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const source = cache && cache.frontmatter && cache.frontmatter['md-reader-source'];
+        if (source === quote.file.path || (!source && quoteSourceFromNote(await this.app.vault.cachedRead(file)) === quote.file.path)) {
+          destination = file; break;
+        }
+      }
+      const path = destination ? destination.path : await this.uniquePath(dir, sanitizeFilename(quote.file.basename), 'md');
+      const heading = quote.heading ? '#' + quote.heading : '';
+      const label = quote.file.basename + (quote.heading ? ' — ' + quote.heading : '');
+      const link = this.app.fileManager.generateMarkdownLink(quote.file, path, heading, label);
+      const block = quoteBlock(quote.text, link);
+      if (destination) {
+        await this.app.vault.process(destination, (body) => body.replace(/\s*$/, '') + '\n\n' + block);
+      } else {
+        const body = '---\nmd-reader-source: ' + JSON.stringify(quote.file.path) + '\n---\n\n# ' + t('quoteTitle') + ' — ' + escapeMd(quote.file.basename) + '\n\n' + block;
+        destination = await this.app.vault.create(path, body);
+      }
+      return destination;
+    });
+    this._quoteQueue = operation;
+    return operation;
+  }
+
   /* ---------- library ---------- */
 
   openLibrary() { new LibraryModal(this.app, this).open(); }
@@ -3710,6 +4169,8 @@ class MdReaderPlugin extends Plugin {
   libraryFiles() {
     const out = [];
     const seen = new Set();
+    let quotesPath = '';
+    try { quotesPath = normalizeQuoteFolder(this.settings.quoteFolder).toLowerCase(); } catch (_) { /* invalid setting is reported on save */ }
     // пустая настройка = корень vault; его НЕ листаем — там весь vault, а не библиотека.
     // Ищем без учёта регистра: «books» в настройке и «Books» в хранилище — одна папка
     const folder = this.settings.importFolder ? this.resolvePath(this.settings.importFolder) : null;
@@ -3717,8 +4178,12 @@ class MdReaderPlugin extends Plugin {
       // вместе с подпапками: книги удобно раскладывать по авторам/сериям.
       // Папки картинок (…​.assets) пропускаем — .md там всё равно нет
       const walk = (dir) => dir.children.forEach((f) => {
-        if (f instanceof TFolder) { if (!f.name.endsWith('.assets')) walk(f); }
-        else if (f instanceof TFile && f.extension === 'md') { out.push({ file: f, registered: false }); seen.add(f.path); }
+        if (f instanceof TFolder) { if (!f.name.endsWith('.assets') && f.path.toLowerCase() !== quotesPath) walk(f); }
+        else if (f instanceof TFile && f.extension === 'md') {
+          const cache = this.app.metadataCache && this.app.metadataCache.getFileCache(f);
+          if (cache && cache.frontmatter && cache.frontmatter['md-reader-source']) return;
+          out.push({ file: f, registered: false }); seen.add(f.path);
+        }
       });
       walk(folder);
     }
@@ -4117,6 +4582,7 @@ class MdReaderPlugin extends Plugin {
     this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((l) => {
       const v = l.view;
       if (v && v.applySettings) {
+        if (v.retainLayoutAnchor) v.retainLayoutAnchor();
         v.applySettings();
         if (v._debouncedRemeasure) v._debouncedRemeasure();
       }

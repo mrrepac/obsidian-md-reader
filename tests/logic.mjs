@@ -12,7 +12,7 @@ const SRC = fileURLToPath(new URL('../main.js', import.meta.url));
 const source = readFileSync(SRC, 'utf8') +
   '\nmodule.exports.__test = { scanHeadings, splitChapters, chunkBySize, txtToMarkdown,' +
   ' normHeading, escapeMd, escapeBlockStart, decodeBuffer, ReaderView, sanitizeFilename,' +
-  ' guessLang };\n';
+  ' guessLang, anchorMatch, anchorSourceText, applyReadingPreset, DEFAULT_SETTINGS };\n';
 
 class Stub { constructor() {} }
 class ItemViewStub { constructor(leaf) { this.leaf = leaf; } }
@@ -322,6 +322,28 @@ eq('перемотка: подпись в середине', scrub.chapterAtG(0.
 eq('перемотка: подпись в конце', scrub.chapterAtG(1), 'Конец');
 scrub.toc = [];
 eq('перемотка: без оглавления пусто', scrub.chapterAtG(0.5), '');
+
+/* ---------- stable text anchors and appearance presets ---------- */
+const repeated = 'first context: same passage. second context: same passage.';
+eq('anchor: context disambiguates repeated text', T.anchorMatch(repeated,
+  { quote: 'same passage.', prefix: 'second context: ' }, 0).start, repeated.lastIndexOf('same passage.'));
+eq('anchor: deleted text falls back', T.anchorMatch('new text', { quote: 'old text' }), null);
+eq('anchor: invalid saved data is ignored', T.anchorMatch('text', { quote: 12 }), null);
+eq('anchor: inline Markdown normalizes to visible text', T.anchorSourceText('## Heading\n\nA **bold** [link](https://example.com) and [[Note|alias]].'), 'Heading A bold link and alias.');
+const duplicateView = Object.create(T.ReaderView.prototype);
+duplicateView.chapters = ['First context: repeated passage.', 'Second context: repeated passage.'];
+duplicateView.chapterChars = duplicateView.chapters.map(s => s.length);
+duplicateView.charsBefore = [0, duplicateView.chapterChars[0]];
+duplicateView.totalChars = duplicateView.chapterChars.reduce((a, b) => a + b, 0);
+eq('anchor: duplicate passage resolves to its matching chapter', duplicateView.anchorChapter({ quote: 'repeated passage.', prefix: 'Second context: ', hint: 0.1 }, 0.1), 1);
+const appearance = { ...T.DEFAULT_SETTINGS, importFolder: 'Books', rememberPosition: false, horizontalPadding: 70 };
+T.applyReadingPreset(appearance, 'compact');
+eq('preset: applies side margins', appearance.horizontalPadding, 12);
+eq('preset: preserves library folder', appearance.importFolder, 'Books');
+eq('preset: preserves reading preference', appearance.rememberPosition, false);
+T.applyReadingPreset(appearance, 'default');
+eq('reset: restores appearance defaults', appearance.horizontalPadding, 24);
+eq('reset: preserves reading preference', appearance.rememberPosition, false);
 
 console.log(`\n${pass} прошло, ${fail} упало`);
 process.exit(fail ? 1 : 0);

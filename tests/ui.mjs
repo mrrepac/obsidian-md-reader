@@ -447,5 +447,59 @@ await boot2.onload();
 eq('перезапуск: положение панелей прочитано', boot2.sidebarPrev, { left: false, right: true });
 ok('перезапуск: положение уходит обратно в data.json', 'sidebarPrev' in boot2.dataBlob());
 
+/* ---------- quote storage: no real vault writes ---------- */
+const quotePlugin = Object.create(T.MdReaderPlugin.prototype);
+quotePlugin.settings = { ...T.DEFAULT_SETTINGS };
+const quoteSource = new TFileStub('Books/Book.md');
+const quoteOther = new TFileStub('Other/Book.md');
+const quoteFiles = new Map([
+  ['Books', new TFolderStub('Books', [])],
+  [quoteSource.path, quoteSource], [quoteOther.path, quoteOther],
+]);
+const quoteBodies = new Map();
+quotePlugin.app = {
+  metadataCache: { getFileCache: () => null },
+  fileManager: { generateMarkdownLink: (file, path, heading, label) => `[[${file.path}${heading}|${label}]]` },
+  vault: {
+    getAbstractFileByPath: path => quoteFiles.get(path) || null,
+    getAllLoadedFiles: () => [...quoteFiles.values()],
+    getMarkdownFiles: () => [...quoteFiles.values()].filter(file => file instanceof TFileStub),
+    cachedRead: async file => quoteBodies.get(file.path) || '',
+    createFolder: async path => { if (quoteFiles.has(path)) throw new Error('exists'); quoteFiles.set(path, new TFolderStub(path, [])); },
+    create: async (path, body) => {
+      if (quoteFiles.has(path)) throw new Error('exists');
+      const file = new TFileStub(path); quoteFiles.set(path, file); quoteBodies.set(path, body); return file;
+    },
+    process: async (file, update) => { await Promise.resolve(); quoteBodies.set(file.path, update(quoteBodies.get(file.path))); },
+  },
+};
+const firstQuote = await quotePlugin.saveQuote({ file: quoteSource, text: 'One *literal* line.\n\nSecond line.', heading: 'Chapter 1' });
+eq('quote: default destination', firstQuote.path, 'Books/Quotes/Book.md');
+ok('quote: source and chapter link', quoteBodies.get(firstQuote.path).includes('[[Books/Book.md#Chapter 1|Book — Chapter 1]]'));
+ok('quote: Markdown stays literal', quoteBodies.get(firstQuote.path).includes('> One \\*literal\\* line.\n> \n> Second line.'));
+await Promise.all([
+  quotePlugin.saveQuote({ file: quoteSource, text: 'Concurrent quote A', heading: '' }),
+  quotePlugin.saveQuote({ file: quoteSource, text: 'Concurrent quote B', heading: '' }),
+]);
+ok('quote: concurrent appends both survive', quoteBodies.get(firstQuote.path).includes('Concurrent quote A') && quoteBodies.get(firstQuote.path).includes('Concurrent quote B'));
+const otherQuote = await quotePlugin.saveQuote({ file: quoteOther, text: 'Different book', heading: '' });
+eq('quote: same titles stay separate', otherQuote.path, 'Books/Quotes/Book (1).md');
+quotePlugin.settings.quoteFolder = 'Notes/Quotes';
+await quotePlugin.app.vault.createFolder('Notes');
+await quotePlugin.app.vault.createFolder('Notes/Quotes');
+await quotePlugin.app.vault.create('Notes/Quotes/Book.md', 'An existing personal note');
+const safeQuote = await quotePlugin.saveQuote({ file: quoteSource, text: 'Custom folder quote', heading: '' });
+eq('quote: existing personal note is not overwritten', quoteBodies.get('Notes/Quotes/Book.md'), 'An existing personal note');
+eq('quote: custom folder and unique path', safeQuote.path, 'Notes/Quotes/Book (1).md');
+quotePlugin.settings.quoteFolder = '../outside';
+let quoteRejected = false;
+try { await quotePlugin.saveQuote({ file: quoteSource, text: 'Rejected', heading: '' }); } catch (_) { quoteRejected = true; }
+ok('quote: outside-vault path is rejected', quoteRejected);
+quotePlugin.settings.quoteFolder = 'Books/Quotes';
+quotePlugin.settings.importFolder = 'Books'; quotePlugin.library = []; quotePlugin.db = {};
+quoteFiles.get('Books/Quotes').children = [firstQuote, otherQuote];
+quoteFiles.get('Books').children = [quoteSource, quoteFiles.get('Books/Quotes')];
+eq('quote: quotes subfolder is not imported as books', quotePlugin.libraryFiles().map(entry => entry.file.path), ['Books/Book.md']);
+
 console.log(`\n${pass} прошло, ${fail} упало`);
 process.exit(fail ? 1 : 0);

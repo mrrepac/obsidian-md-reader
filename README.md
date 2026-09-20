@@ -6,21 +6,35 @@ MD Reader renders a note into fixed-size **pages** and lets you flip through the
 
 It also **imports FB2, EPUB and TXT books into Markdown**, so a whole library lives inside your vault as ordinary notes you can link, quote and search like anything else.
 
+## New in 2.0.0
+
+- Collect quotes in **Books/Quotes**, with one note per book and links to the source.
+- Open **Menu** and **Aa** directly from the reading controls. Adjust side margins,
+  choose an appearance preset, or reset the appearance while keeping the book visible.
+- Restore reading positions and bookmarks by a text fragment, with percentage-based
+  restoration as a fallback. Existing saved progress remains supported.
+- Choose which progress indicators to display, including the time left.
+- Fix the jump to 100% when reopening from the library, narrow-pane clipping,
+  theme-dependent bottom margins and color swatches.
+
+See the [2.0.0 release notes](release-notes/2.0.0.md) for details.
+
 ## Features
 
 ### Reading
 
 - **Horizontal page flip.** Swipe (mobile), tap the left/right third of the screen, use `←` / `→`, `A` / `D`, `Space` / `Shift+Space`, `PageUp` / `PageDown`, `Home` / `End`, the mouse wheel, or the on-screen `‹` `›` buttons.
 - **Single page or two-page spread.** Two pages on wide screens, one on narrow windows and phones — or force a mode.
-- **Remembers your place** in every note, as a fraction of the whole book — so it survives font-size, width and theme changes, and matches up between desktop and phone.
-- **Table of contents, full-book search and bookmarks.** Tap the progress percentage in the status bar to open the menu (also available as commands).
+- **Remembers the text you were reading.** Positions and new bookmarks carry a short text anchor with surrounding context, so changing the font, window width or chapter splitting can return to the same passage. Inserting text before that passage is supported too. If the passage can no longer be found, the saved percentage is the fallback. Older saved positions and bookmarks still work.
+- **Table of contents, full-book search and bookmarks.** Open **Menu** beside the progress indicator (also available as commands).
 - **Scrub the progress bar.** Drag it to move anywhere in the book; the percentage and the chapter you are heading for follow your finger. Landed in the wrong place? One step back returns you.
 - **Chapter at a time.** `Shift+←` / `Shift+→` step through the table of contents, not through internal render blocks. Stepping back from the middle of a chapter returns to its start first, as e-readers do.
 - **Time left.** The status bar says roughly how long the rest of the book will take, from *your* measured reading speed — it learns as you read, with no setting to set.
 - **Open the note for editing.** Spotted a typo in your own note? The menu opens the source in a tab at the current chapter. Edits made anywhere in Obsidian show up in the reader by themselves.
 - **Reading progress** in the status bar, weighted across the whole book, with the **current chapter** next to it — a bare number tells you nothing in a thousand-page novel.
+- **Choose your progress indicators.** In **Aa → Reading progress** or the plugin settings, independently hide the progress bar, page number/percentage, chapter name and time left. Menu and appearance buttons remain available with every indicator off. These choices are saved and are not reset by appearance presets.
 - **Hyphenation follows the book,** not the interface: an English novel is not hyphenated by Russian rules just because Obsidian is in Russian.
-- **Appearance panel.** Font size, line height, margins, page width, tint, brightness and page mode — from the reading menu, without leaving the book. On a phone that used to mean walking out of immersive mode into the plugin settings.
+- **Appearance panel.** Open **Aa** beside the progress indicator. Change font, line height, vertical and side margins, page width, tint, brightness and page mode while the book remains visible. Start with **Book**, **Compact** or **Night**, or reset appearance without changing the library, progress or reading behaviour. On a narrow screen the panel opens as a bottom sheet.
 - **Font size on the fly.** `Ctrl/Cmd` `+` / `−` on the desktop, pinch with two fingers on the phone.
 - **Back to where I was.** Jumped off to a heading, a search hit or a bookmark — one step returns you to the page you were reading (`Backspace`, `Alt+←`, or the menu).
 - **The end.** The last page says so, and offers the library, or a way out, instead of a page that just won't turn.
@@ -48,11 +62,14 @@ While reading:
 
 - **Turn pages:** swipe, tap the left/right edge, arrow keys, `A` / `D`, `Space`, mouse wheel, or the `‹` `›` buttons.
 - **Toggle the interface:** tap the center of the page.
-- **Menu:** tap the percentage in the status bar → table of contents, search, previous/next chapter, back to where you were, appearance, library, open the note for editing, add/remove bookmark, bookmarks, leave the reader.
+- **Menu:** press **Menu** beside the progress indicator (or tap the percentage) → table of contents, search, previous/next chapter, back to where you were, appearance, library, open the note for editing, add/remove bookmark, bookmarks, leave the reader. **Aa** opens appearance directly. Both buttons support keyboard focus and activation.
 - **Leave:** `Esc` once brings the interface back without leaving the book; `Esc` again closes the reader and restores the workspace. Also in the menu, as a command, and on the end screen.
 - **Jump anywhere:** drag the progress bar at the very bottom. `Home` / `End` go to the start and the end of the whole book.
 - **Resize the text:** `Ctrl/Cmd` `+` / `−`, or pinch with two fingers.
 - **Select and copy** with the mouse — dragging across the text no longer flips the page.
+- **Save a quote.** Select text in the book and press the **❞** button beside the reading controls, right-click → **Save selected text as a quote**, or use the command of the same name. The quote is appended to a Markdown note for that book, with a link to the source and its heading when available. Reading stays on the same page.
+
+Quotes go to **`Books/Quotes`** by default; the folder is created on the first save. Change **Quotes folder** in the MD Reader settings to use another folder inside the vault. Each book gets its own note, and books with identical names get separate files. An unrelated existing note is never overwritten. The configured quotes subfolder is excluded from automatic library discovery; you can still add a quote note to the library manually.
 
 ### Commands
 
@@ -71,6 +88,7 @@ While reading:
 | Increase / Decrease font size | Same as `Ctrl/Cmd` `+` / `−` while reading. |
 | Add / remove bookmark | Bookmark the current page. |
 | Open bookmarks | Jump to a bookmark. |
+| Save selected text as a quote | Append the selection to the book's quote note, with a source link. |
 | Toggle full screen | Desktop only. |
 | Cycle page tint | Switch tint on the fly — handy in the evening. |
 | Import book to Markdown (fb2, epub, txt)… | Pick a file and convert it. |
@@ -88,6 +106,9 @@ While reading:
 | Line height | Line spacing. |
 | Gap between pages | Space between the two pages of a spread. |
 | Vertical margins | Empty space at the top and bottom of the page. |
+| Side margins | Minimum outside space on each side, in pixels. The maximum page width can leave additional space; very narrow panes reduce the margin to keep the page inside the viewport. |
+| Reading progress | Separate switches for the progress bar, page number/percentage, chapter name and time left. |
+| Quotes folder | Destination for quote notes, one per book. Default: `Books/Quotes`. |
 | Justify text | Align paragraphs to both edges, with hyphenation where the platform supports it. |
 | Page-flip animation | Animate page turns on/off. |
 | Tap zones | Tap left/right to flip, center to toggle the interface. |
@@ -108,24 +129,38 @@ Interface language follows Obsidian — English and Russian.
 
 Settings → Community plugins → Browse → search **"MD Reader"** → Install → Enable.
 
+If it is already installed, check for updates in Community plugins. Updating keeps
+your settings, saved positions and bookmarks.
+
 ### Manual
 
 Copy `main.js`, `manifest.json` and `styles.css` into
 `<your vault>/.obsidian/plugins/md-reader/` and enable the plugin in
 Settings → Community plugins.
 
+When updating manually, replace those three files and keep `data.json`.
+
 ## Development
 
 The plugin is plain JavaScript with **no build step** — `main.js` is the source and ships as-is. To work on it, edit the files in the plugin folder and reload Obsidian (`Ctrl/Cmd-P` → "Reload app without saving").
 
-There are two test files. They stub the `obsidian` module (and a minimal DOM) and run on bare Node, with no dependencies to install:
+The logic and UI smoke tests stub the `obsidian` module (and a minimal DOM) and run on bare Node, with no dependencies to install:
 
 ```
 node tests/logic.mjs
 node tests/ui.mjs
 ```
 
-`logic.mjs` covers chapter splitting, heading scanning, reading position, chapter navigation, time left, language detection, encodings and the TXT converter; `ui.mjs` builds the library, the appearance panel and the settings tab, checks path handling on case-insensitive file systems and how the side panels are restored, and checks what came out.
+`logic.mjs` covers chapter splitting, text anchors, appearance presets, reading position, navigation, encodings and the TXT converter. `ui.mjs` checks the library, settings, workspace restoration and quote storage, including concurrent appends and filename collisions.
+
+Browser tests use Playwright and Chromium (`npm install --no-save --package-lock=false playwright`, then `npx playwright install chromium`):
+
+```
+node tests/layout.cjs
+node tests/reading.cjs
+```
+
+`layout.cjs` checks page geometry and footer clearance across widths, fonts and page modes. Set `READER_THEMES_DIR` to an Obsidian themes directory to include its themes. `reading.cjs` exercises the reader with a stubbed Obsidian host: delayed library reopening, text anchors after edits/reflow, bookmarks, legacy data, presets, color swatches, progress controls, quote selection and keyboard menu access. These tests do not replace testing in Obsidian on an actual phone. `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` can point to existing installations.
 
 ## License
 
