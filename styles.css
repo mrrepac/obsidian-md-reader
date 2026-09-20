@@ -673,6 +673,13 @@ body.hr-immersive.hr-chrome-hidden
   .workspace-leaf-content[data-type="horizontal-reader-view"] .view-header {
   display: none !important;
 }
+/* Obsidian's floating/auto-hidden phone header reserves margin-top on
+   .view-content even when the header itself is hidden. Release that space
+   only in this reader; the root still owns the OS status-bar safe area. */
+body.is-phone.hr-immersive.hr-chrome-hidden
+  .workspace-leaf-content[data-type="horizontal-reader-view"] {
+  --view-top-spacing: 0px;
+}
 /* вертикальная лента с иконками слева (и справа, если включена).
    Настройка «сворачивать боковые панели» её не убирает: там сворачиваются
    сами панели, а узкая лента остаётся на месте */

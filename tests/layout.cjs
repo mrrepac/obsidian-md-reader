@@ -91,6 +91,43 @@ const css = readFileSync(join(root, 'styles.css'), 'utf8');
     });
     checks++;
     if (dynamic < 3.5) failures.push({ reason: 'footer resize must update bottom clearance', clearance: dynamic });
+    // Mobile host rules from Obsidian 1.14.2: hiding the floating header must
+    // also release its content margin, without removing the root safe area.
+    for (const nav of ['is-floating-nav', 'auto-full-screen', '']) {
+      for (const safeArea of [20, 59]) {
+        await page.setContent(`<style>
+          body { margin: 0; --safe-area-inset-top: ${safeArea}px; --view-header-height: 44px; --view-top-spacing: 0px; }
+          .is-mobile .workspace > .mod-root { padding-top: var(--safe-area-inset-top); }
+          .is-phone.is-floating-nav, .is-phone.auto-full-screen {
+            --view-top-spacing: calc(var(--safe-area-inset-top) + var(--view-header-height) + 8px);
+          }
+          .is-phone .mod-root .workspace-leaf-content .view-content { margin-top: var(--view-top-spacing); }
+        </style><style>${css}</style>
+        <body class="is-mobile is-phone ${nav} hr-immersive hr-chrome-hidden">
+          <div class="workspace"><div class="mod-root">
+            <div class="workspace-leaf-content" data-type="horizontal-reader-view"><div class="view-content hr-view-content"></div></div>
+            <div class="workspace-leaf-content" data-type="other"><div class="view-content"></div></div>
+          </div></div>
+        </body>`);
+        const result = await page.evaluate(() => {
+          const reader = document.querySelector('.hr-view-content');
+          const margin = () => parseFloat(getComputedStyle(reader).marginTop);
+          const hidden = margin();
+          const safe = parseFloat(getComputedStyle(document.querySelector('.mod-root')).paddingTop);
+          const other = parseFloat(getComputedStyle(document.querySelector('[data-type="other"] .view-content')).marginTop);
+          document.body.classList.remove('hr-chrome-hidden');
+          const shown = margin();
+          document.body.classList.add('hr-chrome-hidden');
+          document.body.classList.remove('hr-immersive');
+          return { hidden, safe, other, shown, disabled: margin() };
+        });
+        checks++;
+        const reserved = nav ? safeArea + 44 + 8 : 0;
+        try {
+          assert.deepEqual(result, { hidden: 0, safe: safeArea, other: reserved, shown: reserved, disabled: reserved });
+        } catch (error) { failures.push({ reason: 'mobile header spacing and safe area', nav, safeArea, ...result }); }
+      }
+    }
     console.log(JSON.stringify({ checks, failures }, null, 2));
     process.exitCode = failures.length ? 1 : 0;
   } finally { await browser.close(); }
