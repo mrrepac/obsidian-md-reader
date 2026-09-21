@@ -328,6 +328,8 @@ const repeated = 'first context: same passage. second context: same passage.';
 eq('anchor: context disambiguates repeated text', T.anchorMatch(repeated,
   { quote: 'same passage.', prefix: 'second context: ' }, 0).start, repeated.lastIndexOf('same passage.'));
 eq('anchor: deleted text falls back', T.anchorMatch('new text', { quote: 'old text' }), null);
+eq('anchor: overlapping quotes retain the exact saved occurrence',
+  T.anchorMatch('abcabcabcabc', { quote: 'abcabc', prefix: 'abc' }, 0.25).start, 3);
 eq('anchor: invalid saved data is ignored', T.anchorMatch('text', { quote: 12 }), null);
 eq('anchor: inline Markdown normalizes to visible text', T.anchorSourceText('## Heading\n\nA **bold** [link](https://example.com) and [[Note|alias]].'), 'Heading A bold link and alias.');
 const duplicateView = Object.create(T.ReaderView.prototype);

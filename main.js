@@ -943,7 +943,9 @@ function anchorMatch(text, anchor, hint = 0) {
     }
     const distance = Math.abs(start / Math.max(1, text.length) - hint);
     if (!best || context > best.context || (context === best.context && distance < best.distance)) best = { start, context, distance };
-    start = text.indexOf(anchor.quote, start + Math.max(1, anchor.quote.length));
+    // Repeated phrases can overlap a 96-character quote. Skipping by quote
+    // length misses valid candidates, including the exact saved position.
+    start = text.indexOf(anchor.quote, start + 1);
   }
   return best;
 }

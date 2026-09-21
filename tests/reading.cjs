@@ -121,6 +121,36 @@ const css = readFileSync(join(__dirname, '../styles.css'), 'utf8');
     };
     await page.evaluate(async () => { await view.onOpen(); await view.renderFile(); });
     await page.waitForTimeout(400);
+    await check('unchanged layout reopens the exact page across repeated reading positions', async () => {
+      for (const target of [1, 2, 5, 12, 20]) {
+        view.goTo(target);
+        view.savePos();
+        await view.renderFile();
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        if (view.page !== target) return { target, restored: view.page, saved: plugin.db['book.md'] };
+      }
+      return true;
+    });
+    for (const width of [375, 390, 768, 1100]) {
+      await page.setViewportSize({ width, height: 780 });
+      await page.waitForTimeout(400);
+      await check(`fresh reader reopens the exact page at width ${width}`, async () => {
+        for (const target of [1, 5, 12]) {
+          view.goTo(target);
+          const before = { anchor: view._readingAnchor, padding: getComputedStyle(view.content).paddingBottom, pages: view.totalPages, height: view.viewport.clientHeight };
+          await view.onClose();
+          view.containerEl.remove();
+          const next = new ReaderView(leaf, plugin);
+          Object.assign(next, { buildScope() {}, setupInput() {}, pushScope() {}, popScope() {}, schedulePrefetch() {}, file: bookFile });
+          window.view = leaf.view = next;
+          await next.onOpen();
+          await next.renderFile();
+          await new Promise(resolve => setTimeout(resolve, 450));
+          if (next.page !== target) return { target, restored: next.page, before, after: { padding: getComputedStyle(next.content).paddingBottom, pages: next.totalPages, height: next.viewport.clientHeight, originalPage: next.anchorPage(before.anchor) }, saved: plugin.db['book.md'] };
+        }
+        return true;
+      });
+    }
     await check('capture a character inside a continued paragraph', () => {
       view.goTo(12); window.original = view.captureAnchor();
       return !!original && view.anchorPage(original) === 12 && original.quote.length === 96;
