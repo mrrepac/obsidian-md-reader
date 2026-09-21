@@ -6,6 +6,12 @@ MD Reader renders a note into fixed-size **pages** and lets you flip through the
 
 It also **imports FB2, EPUB and TXT books into Markdown**, so a whole library lives inside your vault as ordinary notes you can link, quote and search like anything else.
 
+## Fixed in 2.0.3
+
+Keep text in place when showing or hiding app controls during immersive reading
+on phones. Panels now overlay the page, and the reader reserves space for the
+system status bar and screen cutout. See the [2.0.3 release notes](release-notes/2.0.3.md).
+
 ## Fixed in 2.0.2
 
 Fix reading-position restoration choosing an earlier occurrence of repeated text,

@@ -673,12 +673,30 @@ body.hr-immersive.hr-chrome-hidden
   .workspace-leaf-content[data-type="horizontal-reader-view"] .view-header {
   display: none !important;
 }
-/* Obsidian's floating/auto-hidden phone header reserves margin-top on
-   .view-content even when the header itself is hidden. Release that space
-   only in this reader; the root still owns the OS status-bar safe area. */
-body.is-phone.hr-immersive.hr-chrome-hidden
+/* Recent phone layouts put the safe area into the header/content spacing
+   instead of the root. Reserve it once at the root while our header overlays
+   the book, keeping both text and controls clear of the system status bar. */
+body.is-phone.hr-immersive .workspace > .mod-root {
+  padding-top: var(--safe-area-inset-top, 0px);
+}
+/* Keep the phone reading area stable when controls are toggled. */
+body.is-phone.hr-immersive
   .workspace-leaf-content[data-type="horizontal-reader-view"] {
   --view-top-spacing: 0px;
+}
+body.is-phone.hr-immersive
+  .workspace-leaf-content[data-type="horizontal-reader-view"] .view-header {
+  position: absolute;
+  top: 0;
+  margin-top: 0;
+  padding-top: 0;
+  z-index: 10;
+  background-color: var(--background-primary);
+}
+/* Older/static mobile navigation must also overlay instead of shrinking the
+   workspace when it returns. Normal app layout resumes outside immersive mode. */
+body.is-phone.hr-immersive .mobile-navbar {
+  position: fixed;
 }
 /* вертикальная лента с иконками слева (и справа, если включена).
    Настройка «сворачивать боковые панели» её не убирает: там сворачиваются
