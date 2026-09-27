@@ -12,7 +12,8 @@ const SRC = fileURLToPath(new URL('../main.js', import.meta.url));
 const source = readFileSync(SRC, 'utf8') +
   '\nmodule.exports.__test = { scanHeadings, splitChapters, chunkBySize, txtToMarkdown,' +
   ' normHeading, escapeMd, escapeBlockStart, decodeBuffer, ReaderView, sanitizeFilename,' +
-  ' guessLang, anchorMatch, anchorSourceText, applyReadingPreset, DEFAULT_SETTINGS };\n';
+  ' guessLang, anchorMatch, anchorSourceText, applyReadingPreset, DEFAULT_SETTINGS,' +
+  ' extractFootnotes, applyFootnoteRefs, prepareFootnotes, noteRef, footnoteDefs };\n';
 
 class Stub { constructor() {} }
 class ItemViewStub { constructor(leaf) { this.leaf = leaf; } }
@@ -346,6 +347,88 @@ eq('preset: preserves reading preference', appearance.rememberPosition, false);
 T.applyReadingPreset(appearance, 'default');
 eq('reset: restores appearance defaults', appearance.horizontalPadding, 24);
 eq('reset: preserves reading preference', appearance.rememberPosition, false);
+
+/* ---------- сноски ---------- */
+{
+  const book = [
+    '# Книга',
+    '',
+    'Первая фраза[^a]. Вторая[^b], снова первая[^a].',
+    '',
+    '## Глава[^b]',
+    '',
+    'Код `[^a]` не трогаем, неизвестную [^zz] тоже.',
+    '',
+    '```',
+    '[^a] в блоке кода',
+    '```',
+    '',
+    '[^a]: Текст первой.',
+    '[^b]: Вторая сноска,',
+    'ленивое продолжение.',
+    '',
+    '    Второй абзац второй.',
+    '',
+    'Обычный абзац после сносок.',
+  ].join('\n');
+  const ex = T.extractFootnotes(book);
+  eq('сноски: найдены определения', Array.from(ex.notes.keys()), ['a', 'b']);
+  eq('сноски: однострочная', ex.notes.get('a'), 'Текст первой.');
+  eq('сноски: ленивое продолжение и второй абзац', ex.notes.get('b'), 'Вторая сноска,\nленивое продолжение.\n\nВторой абзац второй.');
+  eq('сноски: число строк сохранено (оглавление открывает исходник по строке)', ex.body.split('\n').length, book.split('\n').length);
+  ok('сноски: определения вынуты из текста', !/\[\^a\]:|Вторая сноска|Второй абзац/.test(ex.body));
+  ok('сноски: абзац после определений остался', ex.body.includes('Обычный абзац после сносок.'));
+
+  const pop = T.prepareFootnotes(book, 'popup');
+  ok('всплывашка: маркеры по порядку первого упоминания',
+    pop.body.includes('Первая фраза<sup class="hr-fn">1</sup>. Вторая<sup class="hr-fn">2</sup>, снова первая<sup class="hr-fn">1</sup>.'));
+  ok('всплывашка: инлайн-код не тронут', pop.body.includes('`[^a]`'));
+  ok('всплывашка: блок кода не тронут', pop.body.includes('[^a] в блоке кода'));
+  ok('всплывашка: ссылка без определения остаётся как есть', pop.body.includes('[^zz]'));
+  eq('всплывашка: номера', Array.from(pop.order.entries()), [['a', 1], ['b', 2]]);
+  const heads = T.scanHeadings(pop.body.split('\n'));
+  eq('всплывашка: маркер не попадает в оглавление', heads.map((x) => x.text), ['Книга', 'Глава']);
+
+  const inl = T.prepareFootnotes(book, 'inline');
+  ok('в тексте: курсив в скобках', inl.body.includes('Первая фраза (*Текст первой.*).'));
+  ok('в тексте: многоабзацная сноска в одну строку', inl.body.includes('(*Вторая сноска, ленивое продолжение. Второй абзац второй.*)'));
+  const hid = T.prepareFootnotes(book, 'hide');
+  ok('скрыть: маркеры убраны', hid.body.includes('Первая фраза. Вторая, снова первая.'));
+  ok('скрыть: текста сносок нет', !hid.body.includes('Текст первой'));
+  ok('неизвестный режим = всплывашка', T.prepareFootnotes(book, 'что-то').body.includes('class="hr-fn"'));
+
+  const crlf = T.extractFootnotes('Текст[^1].\r\n\r\n[^1]: Сноска.\r\n');
+  eq('сноски: CRLF', crlf.notes.get('1'), 'Сноска.');
+  const star = T.prepareFootnotes('Слово[^1].\n\n[^1]: С *курсивом* внутри.', 'inline');
+  ok('в тексте: своя разметка — без внешнего курсива', star.body.includes('Слово (С *курсивом* внутри.).'));
+  const nested = T.prepareFootnotes('А[^1].\n\n[^1]: См. также[^2].\n[^2]: Вторая.', 'inline');
+  ok('в тексте: ссылка внутри сноски не раскрывается рекурсивно', nested.body.includes('А (*См. также.*).'));
+  const plain = 'Без сносок, но с [^квадратом] в тексте.';
+  eq('без определений текст не меняется', T.prepareFootnotes(plain, 'popup').body, plain);
+
+  const order = new Map();
+  eq('импорт: номер по первой ссылке', [T.noteRef(order, 'x'), T.noteRef(order, 'y'), T.noteRef(order, 'x')], ['[^1]', '[^2]', '[^1]']);
+  eq('импорт: определения в конце', T.footnoteDefs(order, (k) => 'текст ' + k), '[^1]: текст x\n[^2]: текст y');
+
+  // мелкий отступ после определения — уже не сноска: текст не должен пропасть со страницы
+  const list = T.extractFootnotes('Текст[^1].\n\n[^1]: Сноска.\n\n  - пункт списка\n\n    код или продолжение?\n\nДальше.');
+  eq('сноски: пункт с отступом 2 после пустой строки не съеден', list.notes.get('1'), 'Сноска.');
+  ok('сноски: пункт остался в тексте', list.body.includes('  - пункт списка'));
+  const under = T.extractFootnotes('[^1]: Сноска.\n  - вложенный пункт');
+  ok('сноски: пункт прямо под определением не съеден', under.body.includes('  - вложенный пункт') && under.notes.get('1') === 'Сноска.');
+
+  // поиск видит цифру маркера, а не его HTML: иначе фантомные находки и сбитые номера вхождений
+  const sv = Object.create(T.ReaderView.prototype);
+  sv.file = { path: 'b.md' };
+  sv.chapters = [T.prepareFootnotes('Suppose[^1] a supper[^2].\n\n[^1]: One.\n[^2]: Two.', 'popup').body];
+  sv.chapterChars = [sv.chapters[0].length];
+  sv.charsBefore = [0];
+  sv.totalChars = sv.chapterChars[0];
+  eq('поиск: «sup» — только в словах', sv.searchBook('sup').length, 2);
+  eq('поиск: «class» в маркерах не находится', sv.searchBook('class').length, 0);
+  const hit = sv.searchBook('supper')[0];
+  eq('поиск: выдержка без служебного HTML', (hit.before + hit.match + hit.after).trim(), 'Suppose1 a supper2.');
+}
 
 console.log(`\n${pass} прошло, ${fail} упало`);
 process.exit(fail ? 1 : 0);

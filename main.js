@@ -45,6 +45,7 @@ const DEFAULT_SETTINGS = {
   showReadingPosition: true,
   showChapterName: true,
   showTimeLeft: true,
+  footnotes: 'popup',     // how [^1] footnotes show: 'popup' | 'inline' | 'hide'
   quoteFolder: 'Books/Quotes',
   importFolder: '',       // vault folder for imported/converted books ('' = vault root)
 };
@@ -161,6 +162,13 @@ const STRINGS = {
     sHideBar: 'Hide the system status bar (mobile)',
     sHideBarDesc: 'While reading on a phone, also hide the OS status bar (clock, notifications). Experimental — may not work on every device',
     sJustify: 'Justify text',
+    sFootnotes: 'Footnotes',
+    sFootnotesDesc: 'How [^1] footnotes show in the reader. Books imported before version 2.1 have their footnotes baked into the text — re-import them to use this',
+    optFnPopup: 'Number, text on tap',
+    optFnInline: 'In the text, in brackets',
+    optFnHide: 'Hidden',
+    fnTitle: 'Footnote',
+    fnClose: 'Close',
     sJustifyDesc: 'Align paragraphs to both edges, with hyphenation where the platform supports it (the desktop build has no hyphenation dictionaries). Costs about half again as much page layout — the first thing to turn off on a slow machine',
     sPadding: 'Vertical margins, em',
     sSidePadding: 'Side margins, px',
@@ -314,6 +322,13 @@ const STRINGS = {
     sHideBar: 'Прятать системную панель (моб.)',
     sHideBarDesc: 'При чтении на телефоне прятать и системную панель ОС (часы, уведомления). Экспериментально — может не работать на некоторых устройствах',
     sJustify: 'Выравнивание по ширине',
+    sFootnotes: 'Сноски',
+    sFootnotesDesc: 'Как показывать сноски [^1] в ридере. В книгах, импортированных до версии 2.1, сноски вшиты в текст — чтобы режим заработал, импортируйте их заново',
+    optFnPopup: 'Номер, текст по нажатию',
+    optFnInline: 'В тексте, в скобках',
+    optFnHide: 'Не показывать',
+    fnTitle: 'Сноска',
+    fnClose: 'Закрыть',
     sJustifyDesc: 'Ровнять абзацы по обоим краям, с переносами там, где их поддерживает платформа (в десктопной сборке словарей переносов нет). Вёрстка страницы при этом дороже примерно в полтора раза — на медленной машине выключать в первую очередь',
     sPadding: 'Вертикальные поля, em',
     sSidePadding: 'Боковые поля, px',
@@ -714,6 +729,13 @@ class AppearanceModal extends Modal {
       .addToggle((tg) => tg.setValue(p.settings.justify)
         .onChange((v) => { p.settings.justify = v; save(); }));
 
+    // меняет сам текст книги, а не только вид — поэтому перечитка, а не refresh
+    new Setting(contentEl)
+      .setName(t('sFootnotes'))
+      .addDropdown((d) => d.addOptions({ popup: t('optFnPopup'), inline: t('optFnInline'), hide: t('optFnHide') })
+        .setValue(p.settings.footnotes)
+        .onChange((v) => { p.settings.footnotes = v; p.saveAll(); p.reloadOpenViews(); }));
+
     addReadingStatusSettings(contentEl, p, save);
 
     const reset = contentEl.createEl('button', { cls: 'hr-ap-reset', text: t('resetAppearance') });
@@ -782,7 +804,7 @@ function scanHeadings(lines) {
     // ATX. Пробел после решёток обязателен, поэтому #тег заголовком не считается
     const hm = line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/);
     if (hm) {
-      out.push({ line: i, level: hm[1].length, text: (hm[2] || '').replace(/[ \t]+#*[ \t]*$/, '').trim() });
+      out.push({ line: i, level: hm[1].length, text: (hm[2] || '').replace(FN_MARK_RE, '').replace(/[ \t]+#*[ \t]*$/, '').trim() });
       paraStart = null;
       continue;
     }
@@ -791,7 +813,7 @@ function scanHeadings(lines) {
     // сбрасывает paraStart — тогда --- остаётся обычным разделителем, как в CommonMark
     const sm = line.match(/^ {0,3}(=+|-+)[ \t]*$/);
     if (sm && paraStart !== null) {
-      out.push({ line: paraStart, level: sm[1][0] === '=' ? 1 : 2, text: lines.slice(paraStart, i).join(' ').trim() });
+      out.push({ line: paraStart, level: sm[1][0] === '=' ? 1 : 2, text: lines.slice(paraStart, i).join(' ').replace(FN_MARK_RE, '').trim() });
       paraStart = null;
       continue;
     }
@@ -890,6 +912,131 @@ function splitChapters(body, targets) {
   flush();
 
   return { chapters, toc, chars: chapters.map((c) => c.length) };
+}
+
+/* ---------- сноски ---------- */
+// Штатные сноски Markdown: [^метка] в тексте и «[^метка]: текст» где-то в файле.
+// Ридер режет книгу на блоки и рендерит каждый отдельно, поэтому сноски Obsidian
+// здесь не работают: ссылка в пятой главе не видит определения в конце файла и
+// рисуется голым «[^1]». Разбираем их сами — определения вынимаем из текста,
+// ссылки превращаем по режиму: всплывашка по клику, текст в скобках или ничего
+const FOOTNOTE_MODES = ['popup', 'inline', 'hide'];
+const FN_DEF_RE = /^ {0,3}\[\^([^\]\s]+)\]:[ \t]*(.*?)\r?$/;
+const FN_REF_RE = /\[\^([^\]\s]+)\]/g;
+const FN_MARK_RE = /<sup class="hr-fn">\d+<\/sup>/g;
+const FENCE_RE = /^ {0,3}(```+|~~~+)/;
+// строка открывает свой блок — ленивым продолжением сноски она быть не может
+const BLOCK_START_RE = /^ {0,3}(#{1,6}(\s|$)|>|[-*+][ \t]|\d{1,9}[.)][ \t]|```|~~~)/;
+
+// -> { body, notes: Map(метка -> markdown) }. Строки определений заменяются
+// ПУСТЫМИ, а не вырезаются: номера строк нужны оглавлению (открыть исходник на месте)
+function extractFootnotes(body) {
+  body = String(body || '');
+  const notes = new Map();
+  if (body.indexOf('[^') < 0) return { body, notes };
+  const lines = body.split('\n');
+  let inFence = false, fenceCh = '';
+  let cur = null;   // абзацы текущего определения: [[строки], ...]
+  let gap = false;  // после определения была пустая строка
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fm = line.match(FENCE_RE);
+    if (fm) {
+      cur = null;
+      const c = fm[1][0];
+      if (!inFence) { inFence = true; fenceCh = c; } else if (c === fenceCh) { inFence = false; fenceCh = ''; }
+      continue;
+    }
+    if (inFence) continue;
+    const def = line.match(FN_DEF_RE);
+    if (def) {
+      cur = [[def[2]]];
+      gap = false;
+      // первое определение главное — как у самого Obsidian
+      if (!notes.has(def[1])) notes.set(def[1], cur);
+      lines[i] = '';
+      continue;
+    }
+    if (!cur) continue;
+    if (/^\s*$/.test(line)) { gap = true; continue; }
+    if (/^(\t| {4})\s*\S/.test(line)) {
+      // отступ в 4 пробела (или таб) — продолжение сноски, как и у самого Obsidian;
+      // после пустой строки это её следующий абзац. Меньший отступ — уже обычный текст
+      // (вложенный пункт списка и т. п.): проглотить его значило бы спрятать со страницы
+      if (gap) cur.push([]);
+      cur[cur.length - 1].push(line.trim());
+      gap = false;
+      lines[i] = '';
+      continue;
+    }
+    if (!gap && !BLOCK_START_RE.test(line)) {
+      // «ленивое» продолжение: строка сразу под определением без отступа
+      cur[cur.length - 1].push(line.trim());
+      lines[i] = '';
+      continue;
+    }
+    cur = null;
+  }
+  notes.forEach((paras, label) => {
+    notes.set(label, paras.map((p) => p.join('\n').trim()).filter(Boolean).join('\n\n'));
+  });
+  return { body: lines.join('\n'), notes };
+}
+
+// сноска одной строкой — для режима «в тексте». Курсив, если в ней нет своей
+// разметки: вложенные звёздочки внутри *…* ломают разбор
+function inlineNote(md, notes) {
+  const text = applyFootnoteRefs(md, notes, 'hide').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return /[*_]/.test(text) ? ' (' + text + ')' : ' (*' + text + '*)';
+}
+
+// заменить ссылки [^метка] по режиму. order — Map(метка -> номер), номера раздаются
+// в порядке первого упоминания по всей книге (как это делает и сам Obsidian).
+// Код — и блоки, и `инлайн` — не трогаем
+function applyFootnoteRefs(body, notes, mode, order) {
+  body = String(body || '');
+  if (!notes || !notes.size || body.indexOf('[^') < 0) return body;
+  const swap = (m, label) => {
+    if (!notes.has(label)) return m;
+    if (mode === 'hide') return '';
+    if (mode === 'inline') return inlineNote(notes.get(label), notes);
+    let n = order.get(label);
+    if (!n) { n = order.size + 1; order.set(label, n); }
+    return '<sup class="hr-fn">' + n + '</sup>';
+  };
+  const lines = body.split('\n');
+  let inFence = false, fenceCh = '';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fm = line.match(FENCE_RE);
+    if (fm) {
+      const c = fm[1][0];
+      if (!inFence) { inFence = true; fenceCh = c; } else if (c === fenceCh) { inFence = false; fenceCh = ''; }
+      continue;
+    }
+    if (inFence || line.indexOf('[^') < 0) continue;
+    lines[i] = line.split(/(`+[^`]*`+)/).map((part, k) => (k % 2 ? part : part.replace(FN_REF_RE, swap))).join('');
+  }
+  return lines.join('\n');
+}
+
+// -> { body, notes, order }: тело без определений, ссылки заменены по режиму
+function prepareFootnotes(body, mode) {
+  const ex = extractFootnotes(body);
+  const order = new Map();
+  if (!ex.notes.size) return { body: ex.body, notes: ex.notes, order };
+  if (!FOOTNOTE_MODES.includes(mode)) mode = 'popup';
+  return { body: applyFootnoteRefs(ex.body, ex.notes, mode, order), notes: ex.notes, order };
+}
+
+// текст заголовка без номеров сносок: оглавление строится по исходнику, где маркеры
+// уже вычищены (см. scanHeadings), и сравнивать надо с тем же самым
+function headingText(el) {
+  if (!el.querySelector('.hr-fn')) return el.textContent;
+  const copy = el.cloneNode(true);
+  copy.querySelectorAll('.hr-fn').forEach((n) => n.remove());
+  return copy.textContent;
 }
 
 // Язык текста — для переносов при выравнивании по ширине. Раньше брали язык
@@ -1079,7 +1226,7 @@ class ReaderView extends ItemView {
     // разбиение на главы (большие файлы рендерятся по одной главе)
     this._pendingHeading = null;   // {index, text} — отложенный прыжок к заголовку
     this._pendingFind = null;      // {query, ordinal, fraction} — отложенный прыжок к находке
-    this._searchIndex = null;      // {path, low[]} — главы в нижнем регистре для поиска
+    this._searchIndex = null;      // {path, low[], src[]} — видимый текст глав и он же в нижнем регистре, для поиска
     this.chapters = null;     // markdown по главам (для мелких заметок — одна глава = весь текст)
     this.chapterIndex = 0;
     this.toc = [];            // все заголовки: {text, level, chapter, hIndex, line}
@@ -1108,6 +1255,12 @@ class ReaderView extends ItemView {
     this._scrub = null;       // {id, g} — идёт протяжка по полосе прогресса
     this._reloadTimer = null; // отложенная перечитка после правки файла снаружи
     this._keepG = null;       // место, куда вернуться после перечитки (вместо сохранённого)
+
+    // сноски книги (см. prepareFootnotes): метка -> текст, метка -> номер, номер -> метка
+    this.fnNotes = new Map();
+    this.fnOrder = new Map();
+    this.fnLabels = [];
+    this._fn = null;          // открытая всплывашка: {pop, comp, anchor}
   }
 
   getViewType() { return VIEW_TYPE_READER; }
@@ -1212,6 +1365,7 @@ class ReaderView extends ItemView {
     ++this._renderGen; // invalidate file reads/renders still in flight
     this.popScope();
     this.hideEnd();
+    this.closeFootnote();
     if (this.ro) { this.ro.disconnect(); this.ro = null; }
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     if (this._repaginateTimer) { clearTimeout(this._repaginateTimer); this._repaginateTimer = null; }
@@ -1266,6 +1420,15 @@ class ReaderView extends ItemView {
       ? (raw.slice(0, raw.length - body.length).match(/\n/g) || []).length
       : 0;
     this.textLang = guessLang(body);
+
+    // сноски: определения вынимаем, ссылки заменяем по режиму. ДО разбиения на блоки —
+    // иначе определение осталось бы в одном блоке, а ссылка на него в другом
+    this.closeFootnote();
+    const fn = prepareFootnotes(body, this.plugin.settings.footnotes);
+    body = fn.body;
+    this.fnNotes = fn.notes;
+    this.fnOrder = fn.order;
+    this.syncFootnoteLabels();
 
     // разбить на главы (мелкие файлы → одна глава = весь текст) и посчитать метрики прогресса
     const split = splitChapters(body, this.plugin.blockTargets());
@@ -1333,6 +1496,7 @@ class ReaderView extends ItemView {
     const from = this.chapterIndex;
     this.chapterIndex = Math.max(0, Math.min(index, this.chapters.length - 1));
     this.hideEnd();
+    this.closeFootnote();
     this._headPages = null;
 
     // подсветку находки уносить с собой нельзя: блок ляжет в кэш вместе с ней, и при
@@ -1380,6 +1544,7 @@ class ReaderView extends ItemView {
       if (gen !== this._renderGen) return;
     }
     this._blockReady = true;
+    this.decorateFootnotes(this.content);
 
     // заголовок-имя файла — только на первой главе и только если нет своего H1
     if (this.plugin.settings.showTitle && this.chapterIndex === 0) {
@@ -1412,6 +1577,98 @@ class ReaderView extends ItemView {
 
     if (this.viewport) this.viewport.focus();
     if (this.leaf && this.leaf.updateHeader) this.leaf.updateHeader();
+  }
+
+  /* ---------- сноски: всплывашка по нажатию ---------- */
+  // номер на странице -> метка. Номера раздаются по мере встречи, в том числе
+  // внутри самих сносок (ссылка из сноски на другую), поэтому таблицу обновляем
+  syncFootnoteLabels() {
+    this.fnLabels = [];
+    this.fnOrder.forEach((n, label) => { this.fnLabels[n - 1] = label; });
+  }
+
+  // маркеры из markdown приходят голым <sup>: делаем их кнопками для клавиатуры
+  decorateFootnotes(root) {
+    root.querySelectorAll('sup.hr-fn:not([role])').forEach((el) => {
+      el.setAttribute('role', 'button');
+      el.tabIndex = 0;
+    });
+  }
+
+  openFootnote(marker) {
+    const n = parseInt(marker.textContent, 10);
+    const label = this.fnLabels[n - 1];
+    if (!label || !this.fnNotes.has(label) || !this.viewport || !this.file) return;
+    // ссылка из самой сноски: новое окно встаёт туда же, где было, — к маркеру в тексте
+    const inPop = this._fn && this._fn.pop.contains(marker);
+    const anchor = inPop ? this._fn.anchor : marker;
+    this.closeFootnote();
+
+    const pop = this.viewport.createDiv({ cls: 'hr-fn-pop', attr: { role: 'dialog' } });
+    // шрифт чтения задан переменной на странице, а окно лежит рядом с ней
+    const ff = this.content && this.content.style.getPropertyValue('--hr-font-family');
+    if (ff) pop.style.setProperty('--hr-font-family', ff);
+    const head = pop.createDiv('hr-fn-pop-head');
+    head.createSpan({ cls: 'hr-fn-pop-title', text: t('fnTitle') + ' ' + n });
+    const close = head.createEl('button', { cls: 'hr-fn-pop-close clickable-icon', text: '×', attr: { 'aria-label': t('fnClose') } });
+    close.addEventListener('click', (e) => { e.stopPropagation(); this.closeFootnote(true); });
+    const body = pop.createDiv('hr-fn-pop-body markdown-rendered');
+
+    const comp = new Component();
+    this.addChild(comp);
+    this._fn = { pop, comp, anchor };
+    anchor.classList.add('is-active');
+    const md = applyFootnoteRefs(this.fnNotes.get(label), this.fnNotes, 'popup', this.fnOrder);
+    this.syncFootnoteLabels();
+    MarkdownRenderer.render(this.app, md, body, this.file.path, comp)
+      .catch((e) => console.error('MD Reader: ошибка рендера сноски', e))
+      .then(() => {
+        if (!this._fn || this._fn.pop !== pop) return;
+        this.decorateFootnotes(body);
+        this.placeFootnote();
+      });
+    this.placeFootnote();
+  }
+
+  // -> true, если было что закрывать. refocus — вернуть фокус странице (закрыли
+  // кнопкой: иначе он остался бы на удалённом узле и клавиши перестали бы листать)
+  closeFootnote(refocus) {
+    const f = this._fn;
+    if (!f) return false;
+    this._fn = null;
+    f.pop.remove();
+    this.removeChild(f.comp);
+    f.anchor.classList.remove('is-active');
+    if (refocus && this.viewport) this.viewport.focus();
+    return true;
+  }
+
+  // на широком окне — рядом с маркером (под ним, а если снизу не влезает — над),
+  // на узком — полосой снизу во всю ширину: пальцем по маленькому окошку не попасть
+  placeFootnote() {
+    const f = this._fn;
+    if (!f || !this.viewport) return;
+    const vr = this.viewport.getBoundingClientRect();
+    const mr = f.anchor.isConnected ? f.anchor.getBoundingClientRect() : null;
+    const sheet = vr.width < 600 || !mr;
+    f.pop.classList.toggle('is-sheet', sheet);
+    if (sheet) { f.pop.style.left = ''; f.pop.style.top = ''; return; }
+    const w = f.pop.offsetWidth, h = f.pop.offsetHeight, M = 8, GAP = 6;
+    const left = Math.max(M, Math.min(mr.left - vr.left + mr.width / 2 - w / 2, vr.width - w - M));
+    let top = mr.bottom - vr.top + GAP;
+    if (top + h > vr.height - M) top = Math.max(M, mr.top - vr.top - h - GAP);
+    f.pop.style.left = left + 'px';
+    f.pop.style.top = top + 'px';
+  }
+
+  // тап или клик по странице: маркер открывает сноску, промах мимо открытой — только
+  // закрывает её (не листая). Внутри окна решают его собственные ссылки и кнопки
+  footnoteTap(tg) {
+    const marker = tg && tg.closest && tg.closest('.hr-fn');
+    if (marker) { this.openFootnote(marker); return true; }
+    if (!this._fn || (tg && tg.closest && tg.closest('.hr-fn-pop'))) return false;
+    this.closeFootnote();
+    return true;
   }
 
   /* ---------- кэш соседних блоков ---------- */
@@ -1627,9 +1884,13 @@ class ReaderView extends ItemView {
     const np = Math.max(0, Math.min(p, this.totalPages - 1));
     if (np !== this.page) this._readingAnchor = null;
     if (np !== this.page) { this._selectedQuote = null; if (this.quoteButton) this.quoteButton.hidden = true; }
+    // сноска относится к странице: перелистнули — закрыли; пересчёт той же страницы
+    // (поворот, новый размер шрифта) — только переставили к её маркеру
+    if (np !== this.page) this.closeFootnote();
     this.page = isFinite(np) ? np : 0;
     this.hideEnd();
     this.applyTransform();
+    this.placeFootnote();
     this.updateStatus();
     this.savePos();
     // подготовка следующего блока начинается ближе к концу текущего — проверяем
@@ -1700,6 +1961,7 @@ class ReaderView extends ItemView {
   // листать дальше некуда: вместо «ничего не произошло» — отбивка и выход из книги
   showEnd() {
     if (!this.viewport || this._endEl || !this.file) return;
+    this.closeFootnote();
     const box = this.viewport.createDiv('hr-end');
     this._endEl = box;
     box.createDiv({ cls: 'hr-end-title', text: t('endTitle') });
@@ -1851,7 +2113,7 @@ class ReaderView extends ItemView {
     if (want) {
       let best = null, bestD = Infinity;
       for (let i = 0; i < els.length; i++) {
-        if (normHeading(els[i].textContent) !== want) continue;
+        if (normHeading(headingText(els[i])) !== want) continue;
         const d = Math.abs(i - index);
         if (d < bestD) { bestD = d; best = els[i]; }
       }
@@ -2015,10 +2277,16 @@ class ReaderView extends ItemView {
   // обычно упирается в лимит совпадений задолго до конца текста
   lowerChapter(i) {
     const path = this.file ? this.file.path : '';
-    if (!this._searchIndex || this._searchIndex.path !== path) this._searchIndex = { path, low: [] };
-    const low = this._searchIndex.low;
-    if (low[i] === undefined) low[i] = String(this.chapters[i] || '').toLowerCase();
-    return low[i];
+    if (!this._searchIndex || this._searchIndex.path !== path) this._searchIndex = { path, low: [], src: [] };
+    const idx = this._searchIndex;
+    if (idx.low[i] === undefined) {
+      // маркер сноски — служебный HTML: на странице от него видна только цифра.
+      // Иначе «class» и «sup» находились бы в каждой сноске, а номер вхождения
+      // («supper» в английской книге) разъехался бы с тем, что ищется в DOM
+      idx.src[i] = String(this.chapters[i] || '').replace(FN_MARK_RE, (m) => m.replace(/<[^>]*>/g, ''));
+      idx.low[i] = idx.src[i].toLowerCase();
+    }
+    return idx.low[i];
   }
 
   // ищем по ИСХОДНОМУ markdown всех блоков: так находки есть и в неотрисованных
@@ -2031,7 +2299,7 @@ class ReaderView extends ItemView {
     const clean = (s) => s.replace(/\s+/g, ' ');
     for (let ch = 0; ch < this.chapters.length && out.length < LIMIT; ch++) {
       const hay = this.lowerChapter(ch);
-      const src = this.chapters[ch];
+      const src = this._searchIndex.src[ch]; // тот же текст, что и hay, для выдержки
       let idx = hay.indexOf(q);
       let ord = 0;
       while (idx >= 0 && out.length < LIMIT) {
@@ -2451,13 +2719,18 @@ class ReaderView extends ItemView {
     if (this._reloadTimer) clearTimeout(this._reloadTimer);
     this._reloadTimer = setTimeout(() => {
       this._reloadTimer = null;
-      if (!this.file || !this.content || !this.content.isConnected) return;
-      // держимся за место долей книги, а не страницей: текст изменился, страницы поедут.
-      // Через _keepG, а не через сохранённую позицию: «запоминать позицию» может быть выключено
-      this._keepG = this._measured ? this.currentG() : null;
-      this._keepAnchor = this._readingAnchor || this.captureAnchor();
-      this.renderFile();
+      this.reloadKeepingPlace();
     }, 900);
+  }
+
+  // перечитать книгу, не потеряв место: файл правили снаружи или сменился режим сносок
+  reloadKeepingPlace() {
+    if (!this.file || !this.content || !this.content.isConnected) return;
+    // держимся за место долей книги, а не страницей: текст изменился, страницы поедут.
+    // Через _keepG, а не через сохранённую позицию: «запоминать позицию» может быть выключено
+    this._keepG = this._measured ? this.currentG() : null;
+    this._keepAnchor = this._readingAnchor || this.captureAnchor();
+    this.renderFile();
   }
 
   setupRepagination() {
@@ -2516,6 +2789,7 @@ class ReaderView extends ItemView {
   // второй выходит из чтения совсем. Так «случайный Esc» ничего не теряет,
   // а выйти всё равно можно не глядя
   onEscape() {
+    if (this.closeFootnote(true)) return; // сначала закрыть открытую сноску
     if (this.chromeHidden()) { this.exitReadingChrome(); return; }
     if (this.plugin) this.plugin.exitReader(this.leaf);
   }
@@ -2593,7 +2867,7 @@ class ReaderView extends ItemView {
     };
 
     const interactive = (tg) => !!(tg && tg.closest && tg.closest(
-      'a, input, button, textarea, select, [contenteditable], .task-list-item-checkbox, .callout-fold, .footnote-link, audio, video, .hr-ui, .hr-end'
+      'a, input, button, textarea, select, [contenteditable], .task-list-item-checkbox, .callout-fold, .footnote-link, audio, video, .hr-ui, .hr-end, .hr-fn, .hr-fn-pop'
     ));
 
     this.registerDomEvent(vp, 'touchstart', (e) => {
@@ -2605,6 +2879,8 @@ class ReaderView extends ItemView {
       if (e.touches.length !== 1) { abortDrag(); return; }
       // палец лёг на полосу перемотки — тянут её, а не страницу
       if (e.target && e.target.closest && e.target.closest('.hr-scrub')) { abortDrag(); return; }
+      // в окне сноски палец прокручивает саму сноску, а не листает книгу
+      if (e.target && e.target.closest && e.target.closest('.hr-fn-pop')) { abortDrag(); return; }
       const tc = e.touches[0];
       const win = (vp.ownerDocument && vp.ownerDocument.defaultView) || window;
       if (Math.min(tc.clientX, win.innerWidth - tc.clientX) < OS_EDGE) { abortDrag(); return; }
@@ -2653,6 +2929,7 @@ class ReaderView extends ItemView {
 
       if (Math.abs(dx) < TAP_MOVE && Math.abs(dy) < TAP_MOVE && dt < TAP_MS) {
         decided = false; horizontal = false;
+        if (this.footnoteTap(e.target)) { this.applyTransform(); return; }
         if (interactive(e.target)) { this.applyTransform(); return; }
         if (!this.plugin.settings.tapZones) { this.applyTransform(); return; }
         const r = vp.getBoundingClientRect();
@@ -2679,6 +2956,7 @@ class ReaderView extends ItemView {
 
     this.registerDomEvent(vp, 'click', (e) => {
       if (this._lastTouch && Date.now() - this._lastTouch < 700) return;
+      if (this.footnoteTap(e.target)) return;
       if (interactive(e.target)) return;
       if (!this.plugin.settings.tapZones) return;
       if (e.detail > 1) return; // двойной/тройной клик — это выделение слова или абзаца
@@ -2695,6 +2973,13 @@ class ReaderView extends ItemView {
     // A/D — то же самое, что стрелки. Ловим по e.code, а не через Scope по key:
     // на русской раскладке key будет «ф» и «в», а code остаётся KeyA/KeyD
     this.registerDomEvent(vp, 'keydown', (e) => {
+      // Enter на маркере сноски (до него дошли Tab'ом) — открыть её
+      if (e.key === 'Enter' && e.target && e.target.closest && e.target.closest('.hr-fn')) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.openFootnote(e.target.closest('.hr-fn'));
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
       if (e.code !== 'KeyA' && e.code !== 'KeyD') return;
       e.preventDefault();
@@ -2705,6 +2990,8 @@ class ReaderView extends ItemView {
     if (Platform.isDesktop) {
       let wheelLock = false;
       this.registerDomEvent(vp, 'wheel', (e) => {
+        // колесо над сноской прокручивает её длинный текст
+        if (e.target && e.target.closest && e.target.closest('.hr-fn-pop')) return;
         const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
         if (Math.abs(d) < 20) return;
         e.preventDefault();
@@ -2816,6 +3103,17 @@ class ReaderSettingTab extends PluginSettingTab {
       .setDesc(t('sJustifyDesc'))
       .addToggle((tg) => tg.setValue(this.plugin.settings.justify)
         .onChange(async (v) => { this.plugin.settings.justify = v; await save(); }));
+
+    new Setting(containerEl)
+      .setName(t('sFootnotes'))
+      .setDesc(t('sFootnotesDesc'))
+      .addDropdown((d) => d.addOptions({ popup: t('optFnPopup'), inline: t('optFnInline'), hide: t('optFnHide') })
+        .setValue(this.plugin.settings.footnotes)
+        .onChange(async (v) => {
+          this.plugin.settings.footnotes = v;
+          await this.plugin.saveAll();
+          this.plugin.reloadOpenViews();
+        }));
 
     section('sSecColour');
 
@@ -3018,6 +3316,27 @@ function base64ToBytes(b64) {
 }
 
 /* ---------- FB2 (XML) -> Markdown ---------- */
+// Сноски при импорте — стандартные сноски Markdown: [^N] на месте ссылки, а
+// определения «[^N]: текст» одним блоком в конце книги. Номер — по порядку первой
+// ссылки. Как их показать (окном, в скобках, никак), решает уже ридер
+function noteRef(order, key) {
+  let n = order.get(key);
+  if (!n) { n = order.size + 1; order.set(key, n); }
+  return '[^' + n + ']';
+}
+
+function footnoteDefs(order, textOf) {
+  const lines = [];
+  order.forEach((n, key) => lines.push('[^' + n + ']: ' + textOf(key)));
+  return lines.join('\n');
+}
+
+// верхний индекс вокруг одной лишь ссылки на сноску не нужен: маркер и так
+// рисуется над строкой, а <sup> вокруг поднял бы его дважды
+function supText(inner) {
+  return /^\[\^\d+\]$/.test(inner.trim()) ? inner.trim() : '<sup>' + inner + '</sup>';
+}
+
 class Fb2Converter {
   constructor(slug) {
     this.slug = slug || 'book';
@@ -3025,6 +3344,7 @@ class Fb2Converter {
     this.binaries = {};       // id -> {type, data(base64)}
     this.noteSectionIds = new Set();
     this.notesById = {};
+    this.fnOrder = new Map(); // id сноски -> её номер в книге
     this.bookTitle = '';
     this._seenImg = new Set();
   }
@@ -3043,13 +3363,13 @@ class Fb2Converter {
     });
 
     const bodies = this.childrenByName(root, 'body');
-    // ids секций-сносок — ссылки на них инлайним в текст скобками
+    // ids секций-сносок — ссылки на них станут сносками [^N]
     bodies.forEach((b) => {
       const nm = (b.getAttribute('name') || '').toLowerCase();
       if (nm === 'notes' || nm === 'comments')
         this.childrenByName(b, 'section').forEach((s) => { const id = s.getAttribute('id'); if (id) this.noteSectionIds.add(id); });
     });
-    // тексты сносок собираем ДО рендера тел: link() подставляет их на месте ссылки
+    // тексты сносок собираем ДО рендера тел: link() ставит [^N], только если текст есть
     this.notesById = this.collectNotes(bodies);
 
     const titleInfo = this.first(root, 'title-info');
@@ -3068,6 +3388,7 @@ class Fb2Converter {
       if (nm === 'notes' || nm === 'comments') return;
       this.renderBody(b, out);
     });
+    if (this.fnOrder.size) out.push(footnoteDefs(this.fnOrder, (id) => this.notesById[id]));
 
     return out.filter((s) => s != null && s !== '').join('\n\n') + '\n';
   }
@@ -3138,7 +3459,7 @@ class Fb2Converter {
         case 'strikethrough': s += '~~' + this.inline(n) + '~~'; break;
         case 'code': s += '`' + (n.textContent || '') + '`'; break;
         case 'sub': s += '<sub>' + this.inline(n) + '</sub>'; break;
-        case 'sup': s += '<sup>' + this.inline(n) + '</sup>'; break;
+        case 'sup': s += supText(this.inline(n)); break;
         case 'a': s += this.link(n); break;
         case 'image': { const e = this.imageEmbed(n); if (e) s += e; break; }
         default: s += this.inline(n); // style и прочее — прозрачно
@@ -3154,10 +3475,9 @@ class Fb2Converter {
     if (href.startsWith('#')) {
       const id = href.slice(1);
       if (type === 'note' || this.noteSectionIds.has(id)) {
-        // сноска инлайном: вместо маркера [1] — её текст в скобках курсивом.
         // notesById ещё пуст, пока собираются сами сноски (перекрёстные ссылки) — тогда маркер
         const md = this.notesById && this.notesById[id];
-        return md ? ' (*' + md + '*)' : text;
+        return md ? noteRef(this.fnOrder, id) : text;
       }
       return text;
     }
@@ -3386,6 +3706,7 @@ class EpubConverter {
     this.bookTitle = '';
     this.imgBytes = new Map(); // путь в архиве -> {type, bytes}, распакованы заранее
     this.notes = new Map();    // "путь#id" -> текст сноски одной строкой
+    this.fnOrder = new Map();  // "путь#id" -> номер сноски в книге
     this.noteEls = new Set();  // элементы-сноски: в общий поток не выводим
     this.notesFrom = new Set(); // документы, из которых забрали сноски
     this.coverPath = '';
@@ -3465,6 +3786,7 @@ class EpubConverter {
     this.indexNotes(docs);
     let rendered = 0;
     docs.forEach((d) => { if (this.renderDoc(d, titles, out)) rendered++; });
+    if (this.fnOrder.size) out.push(footnoteDefs(this.fnOrder, (key) => this.notes.get(key)));
     if (!rendered) {
       console.warn('MD Reader: главы прочитаны, но текста в них не нашлось:', docs.map((d) => d.path));
       throw new Error('EPUB: все ' + docs.length + ' глав оказались пустыми');
@@ -3518,7 +3840,7 @@ class EpubConverter {
     return map;
   }
 
-  /* --- сноски: как и в FB2, вставляем текст в скобках прямо на месте ссылки --- */
+  /* --- сноски: как и в FB2, на месте ссылки [^N], определения в конце книги --- */
   isNote(el) {
     const et = (el.getAttribute('epub:type') || el.getAttributeNS(EPUB_NS_OPS, 'type') || '').toLowerCase();
     if (/(foot|end|rear)note|(^|\s)note(\s|$)/.test(et)) return true;
@@ -3766,7 +4088,7 @@ class EpubConverter {
         case 's': case 'del': case 'strike': s += wrap('~~'); break;
         case 'code': case 'kbd': case 'samp': case 'tt': s += '`' + (n.textContent || '') + '`'; break;
         case 'sub': s += '<sub>' + this.inline(n) + '</sub>'; break;
-        case 'sup': s += '<sup>' + this.inline(n) + '</sup>'; break;
+        case 'sup': s += supText(this.inline(n)); break;
         case 'a': s += this.link(n); break;
         case 'img': case 'image': s += this.imageEmbed(n); break;
         case 'script': case 'style': break;
@@ -3784,9 +4106,8 @@ class EpubConverter {
     if (!this._inNote) {
       const frag = href.split('#')[1] || '';
       const target = href.startsWith('#') ? this.curPath : zipResolve(dirName(this.curPath), href);
-      const md = this.notes.get(target + '#' + frag);
-      // сноска инлайном: маркер [1] бесполезен, определение уедет в другой блок рендера
-      if (md) return ' (*' + md + '*)';
+      const key = target + '#' + frag;
+      if (this.notes.has(key)) return noteRef(this.fnOrder, key);
     }
     return text; // прочие внутренние ссылки — просто текст
   }
@@ -4578,6 +4899,13 @@ class MdReaderPlugin extends Plugin {
     if (Platform.isMobile) this.setSysStatusBar(on && this.settings.hideMobileBar);
     // ушли из ридера — вернуть окно из полного экрана (на выход жест не нужен)
     if (Platform.isDesktop && !isReader) this.setFullscreen(doc, false);
+  }
+
+  // настройка меняет сам текст книги, а не только вид (режим сносок) — перечитать
+  reloadOpenViews() {
+    this.app.workspace.getLeavesOfType(VIEW_TYPE_READER).forEach((l) => {
+      if (l.view && l.view.reloadKeepingPlace) l.view.reloadKeepingPlace();
+    });
   }
 
   refreshOpenViews() {

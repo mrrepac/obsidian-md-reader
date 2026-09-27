@@ -736,3 +736,69 @@ body.hr-hide-sysbar .workspace,
 body.hr-hide-sysbar .workspace-leaf-content[data-type="horizontal-reader-view"] {
   padding-top: 0 !important;
 }
+
+/* ===== Сноски ===== */
+/* Маркер в тексте: номер-кнопка. Поле вокруг цифры — чтобы попадать пальцем,
+   строку почти не раздвигает (отрицательный margin съедает большую часть) */
+.hr-content sup.hr-fn {
+  padding: 0 0.25em;
+  margin: 0 -0.1em;
+  color: var(--text-accent);
+  font-weight: var(--font-semibold, 600);
+  cursor: pointer;
+  border-radius: var(--radius-s, 4px);
+}
+.hr-content sup.hr-fn:hover,
+.hr-content sup.hr-fn.is-active { background: var(--background-modifier-hover); }
+.hr-content sup.hr-fn:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 1px; }
+
+/* Окно сноски. Координаты рядом с маркером задаёт JS; на узком окне — полоса снизу */
+.hr-fn-pop {
+  position: absolute;
+  z-index: 7;
+  width: min(26em, calc(100% - 16px));
+  max-height: 45%;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--hr-font-family, var(--font-text));
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  box-shadow: var(--shadow-l);
+  animation: hr-end-in 0.12s ease;
+}
+.hr-fn-pop.is-sheet {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-height: 55%;
+  border-width: 1px 0 0;
+  border-radius: var(--radius-l, 12px) var(--radius-l, 12px) 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.hr-fn-pop-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 6px 0 14px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+.hr-fn-pop-close { font-size: 1.3em; line-height: 1; }
+.hr-fn-pop-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 14px 12px;
+  line-height: 1.5;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.hr-fn-pop-body > :first-child { margin-top: 0; }
+.hr-fn-pop-body > :last-child { margin-bottom: 0; }
+@media (pointer: coarse) {
+  .hr-fn-pop-close { min-width: 44px; min-height: 44px; }
+}
