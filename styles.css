@@ -137,7 +137,8 @@
   line-height: var(--hr-line-height, 1.6);
   color: var(--text-normal);
 
-  will-change: transform;
+  /* no will-change: a composited column strip makes Chromium re-layerize every
+     page of a math-heavy note on each layer change (~2 s per flip) */
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
 }
