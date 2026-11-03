@@ -1860,12 +1860,9 @@ class ReaderView extends ItemView {
     if (this.page < 0) this.page = 0;
     if (!isFinite(this.page)) this.page = 0;
 
-    // перепагинация и смена главы должны ПРЫГАТЬ, а не анимироваться — гасим переход
-    // на момент применения; пользовательское листание (goTo) анимируется как прежде
-    this.content.style.transition = 'none';
+    // перепагинация и смена главы должны ПРЫГАТЬ, а не анимироваться;
+    // пользовательское листание (goTo) анимируется как прежде
     this.applyTransform();
-    void this.content.offsetWidth; // зафиксировать transform без анимации
-    this.content.style.transition = this.plugin.settings.animate ? 'transform 0.2s ease' : 'none';
 
     this.updateStatus();
     this.savePos();
@@ -1874,10 +1871,26 @@ class ReaderView extends ItemView {
     if (!mediaLoading && !this._pendingAnchor && !this._pendingHeading && !this._pendingFind && !this._pendingFraction) this.schedulePrefetch();
   }
 
-  applyTransform() {
-    if (this.content) {
-      this.content.style.transform = 'translateX(' + (-this.page * this.pageStride) + 'px)';
-    }
+  // Slide with rAF, not a CSS transition: a transform transition promotes the
+  // whole column strip to a compositor layer, and Chromium then re-layerizes
+  // every page of a math-heavy note at the start and end of each flip (~2 s
+  // each). Moving a non-composited element costs one cheap repaint per frame.
+  applyTransform(animate) {
+    const c = this.content;
+    if (!c) return;
+    const win = c.ownerDocument.defaultView;
+    if (this._slide) { win.cancelAnimationFrame(this._slide); this._slide = 0; }
+    const to = -this.page * this.pageStride;
+    const set = (x) => { c.style.transform = 'translateX(' + x + 'px)'; };
+    if (!animate || !this.plugin.settings.animate) { set(to); return; }
+    const from = new DOMMatrixReadOnly(win.getComputedStyle(c).transform).m41;
+    const t0 = win.performance.now();
+    const step = (now) => {
+      const k = Math.min(1, Math.max(0, (now - t0) / 200));
+      set(from + (to - from) * (1 - Math.pow(1 - k, 3)));
+      this._slide = k < 1 ? win.requestAnimationFrame(step) : 0;
+    };
+    this._slide = win.requestAnimationFrame(step);
   }
 
   goTo(p) {
@@ -1889,7 +1902,7 @@ class ReaderView extends ItemView {
     if (np !== this.page) this.closeFootnote();
     this.page = isFinite(np) ? np : 0;
     this.hideEnd();
-    this.applyTransform();
+    this.applyTransform(true);
     this.placeFootnote();
     this.updateStatus();
     this.savePos();
@@ -2622,7 +2635,6 @@ class ReaderView extends ItemView {
     c.style.setProperty('--hr-font-size', s.fontSize + 'em');
     c.style.setProperty('--hr-line-height', String(s.lineHeight));
     c.style.setProperty('--hr-col-gap', s.columnGap + 'em');
-    c.style.transition = s.animate ? 'transform 0.2s ease' : 'none';
     // вертикальные поля страницы: задаём инлайн, чтобы перебить и базовое правило,
     // и мобильный оверрайд; снизу +0.6em, чтобы последняя строка не липла к строке статуса
     const padY = (typeof s.verticalPadding === 'number') ? s.verticalPadding : 1.4;
@@ -2861,8 +2873,7 @@ class ReaderView extends ItemView {
     const abortDrag = () => {
       if (dragging) {
         dragging = false; decided = false; horizontal = false;
-        this.content.style.transition = this.plugin.settings.animate ? 'transform 0.2s ease' : 'none';
-        this.applyTransform();
+        this.applyTransform(true);
       }
     };
 
@@ -2886,7 +2897,7 @@ class ReaderView extends ItemView {
       if (Math.min(tc.clientX, win.innerWidth - tc.clientX) < OS_EDGE) { abortDrag(); return; }
       x0 = tc.clientX; y0 = tc.clientY; t0 = Date.now();
       dragging = true; decided = false; horizontal = false;
-      this.content.style.transition = 'none';
+      if (this._slide) { win.cancelAnimationFrame(this._slide); this._slide = 0; }
     }, { capture: true, passive: true });
 
     this.registerDomEvent(vp, 'touchmove', (e) => {
@@ -2923,15 +2934,14 @@ class ReaderView extends ItemView {
       if (!dragging) return;
       dragging = false;
       this._lastTouch = Date.now();
-      this.content.style.transition = this.plugin.settings.animate ? 'transform 0.2s ease' : 'none';
       const tc = e.changedTouches[0];
       const dx = tc.clientX - x0, dy = tc.clientY - y0, dt = Date.now() - t0;
 
       if (Math.abs(dx) < TAP_MOVE && Math.abs(dy) < TAP_MOVE && dt < TAP_MS) {
         decided = false; horizontal = false;
-        if (this.footnoteTap(e.target)) { this.applyTransform(); return; }
-        if (interactive(e.target)) { this.applyTransform(); return; }
-        if (!this.plugin.settings.tapZones) { this.applyTransform(); return; }
+        if (this.footnoteTap(e.target)) { this.applyTransform(true); return; }
+        if (interactive(e.target)) { this.applyTransform(true); return; }
+        if (!this.plugin.settings.tapZones) { this.applyTransform(true); return; }
         const r = vp.getBoundingClientRect();
         const x = tc.clientX - r.left, w = vp.clientWidth;
         if (x < w * 0.3) this.prev();
@@ -2942,7 +2952,7 @@ class ReaderView extends ItemView {
       if (horizontal && Math.abs(dx) >= SWIPE && Math.abs(dx) > Math.abs(dy) * 1.5) {
         if (dx < 0) this.next(); else this.prev();
       } else {
-        this.applyTransform();
+        this.applyTransform(true);
       }
       decided = false; horizontal = false;
     };
